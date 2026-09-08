@@ -75,8 +75,9 @@ class MainActivity : AppCompatActivity() {
     private val themes = ThemeMode.values()
     val currentTheme: ThemeMode get() = themes[currentThemeIndex]
 
-    // 运行模式：正常时钟 或 25分钟专注番茄钟
+    // 运行模式：正常时钟 或 专注番茄钟
     private var isPomodoroMode = false
+    private var pomodoroDurationMinutes = 25
     private var pomodoroRemainingSeconds = 25 * 60
     private var isPomodoroRunning = false
 
@@ -110,6 +111,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var radioDialogScrollView: ScrollView
     private lateinit var radioStationsContainer: LinearLayout
     private lateinit var tvDialogStationCount: TextView
+
+    // 番茄钟时长设置弹窗控件
+    private lateinit var pomodoroDialogOverlay: FrameLayout
+    private lateinit var pomodoroDialogCard: LinearLayout
+    private lateinit var tvPomodoroDurationValue: TextView
+    private val pomodoroPresetButtons = mutableListOf<TextView>()
+    private var tempPomodoroMinutes = 25
 
     // 底部番茄钟控制条
     private lateinit var pomodoroControlLayout: LinearLayout
@@ -237,9 +245,11 @@ class MainActivity : AppCompatActivity() {
 
         rootContainer.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_UP) {
-                // 如果电台弹窗正在显示，点击背景关闭弹窗；否则切换主题
+                // 如果弹窗正在显示，点击背景关闭弹窗；否则切换主题
                 if (radioStationDialogOverlay.visibility == View.VISIBLE) {
                     hideRadioStationDialog()
+                } else if (::pomodoroDialogOverlay.isInitialized && pomodoroDialogOverlay.visibility == View.VISIBLE) {
+                    hidePomodoroSettingDialog()
                 } else {
                     switchNextTheme()
                 }
@@ -291,6 +301,11 @@ class MainActivity : AppCompatActivity() {
         }
         btnPomodoro = HeaderIconButton(this, IconType.POMODORO).apply {
             setOnClickListener { toggleClockMode() }
+            // 长按右上角番茄钟图标弹出专注时长设置弹窗
+            setOnLongClickListener {
+                showPomodoroSettingDialog()
+                true
+            }
         }
         btnTheme = HeaderIconButton(this, IconType.THEME).apply {
             setOnClickListener { switchNextTheme() }
@@ -331,8 +346,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         cardHour = FlipCardView(this)
-        cardMinute = FlipCardView(this)
-        cardSecond = FlipCardView(this)
+        // 在番茄钟模式下点击倒计时数字，即可呼出时长设置弹窗
+        cardMinute = FlipCardView(this).apply {
+            setOnClickListener {
+                if (isPomodoroMode) showPomodoroSettingDialog()
+            }
+        }
+        cardSecond = FlipCardView(this).apply {
+            setOnClickListener {
+                if (isPomodoroMode) showPomodoroSettingDialog()
+            }
+        }
 
         clockRow.addView(cardHour)
         clockRow.addView(cardMinute)
@@ -355,6 +379,9 @@ class MainActivity : AppCompatActivity() {
             typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
             gravity = Gravity.CENTER
             letterSpacing = 0.10f
+            setOnClickListener {
+                if (isPomodoroMode) showPomodoroSettingDialog()
+            }
         }
         pillarsInfoContainer.addView(tvFourPillars)
 
@@ -365,6 +392,9 @@ class MainActivity : AppCompatActivity() {
             alpha = 0.85f
             letterSpacing = 0.05f
             setPadding(0, (6 * density).toInt(), 0, 0)
+            setOnClickListener {
+                if (isPomodoroMode) showPomodoroSettingDialog()
+            }
         }
         pillarsInfoContainer.addView(tvLunarAndDate)
         centerContentWrapper.addView(pillarsInfoContainer)
@@ -443,6 +473,7 @@ class MainActivity : AppCompatActivity() {
         // 4. 电台频道列表毛玻璃弹窗图层 (Radio Station Dialog Overlay)
         // ---------------------------------------------------------------------------------
         setupRadioStationDialog()
+        setupPomodoroSettingDialog()
 
         // 布局变动自动重算卡片尺寸
         rootContainer.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -710,6 +741,289 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 构建毛玻璃番茄钟时长自定义设置弹窗
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupPomodoroSettingDialog() {
+        val density = resources.displayMetrics.density
+
+        pomodoroDialogOverlay = FrameLayout(this).apply {
+            visibility = View.GONE
+            alpha = 0f
+            setBackgroundColor(0x88000000.toInt())
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_UP) {
+                    hidePomodoroSettingDialog()
+                }
+                true
+            }
+        }
+
+        pomodoroDialogCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            val cardW = (330 * density).toInt()
+            layoutParams = FrameLayout.LayoutParams(cardW, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER).apply {
+                topMargin = (24 * density).toInt()
+                bottomMargin = (24 * density).toInt()
+            }
+            setPadding((22 * density).toInt(), (20 * density).toInt(), (22 * density).toInt(), (20 * density).toInt())
+            setOnTouchListener { _, _ -> true }
+        }
+
+        // 1. 顶部标题栏
+        val headerLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val tvTitle = TextView(this).apply {
+            text = "⏱ 设定专注时长"
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+        headerLayout.addView(tvTitle)
+
+        val btnClose = TextView(this).apply {
+            text = "✕"
+            textSize = 18f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            val p = (8 * density).toInt()
+            setPadding(p, p, p, p)
+            setOnClickListener { hidePomodoroSettingDialog() }
+        }
+        headerLayout.addView(btnClose)
+        pomodoroDialogCard.addView(headerLayout)
+
+        // 中部分割线
+        val divider = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).apply {
+                topMargin = (12 * density).toInt()
+                bottomMargin = (14 * density).toInt()
+            }
+        }
+        pomodoroDialogCard.addView(divider)
+
+        // 2. 核心时长调节器 (-  [XX] 分钟  +)
+        val stepperRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val btnMinus = TextView(this).apply {
+            text = "－"
+            textSize = 24f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            val btnSize = (44 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 14f * density
+                setColor(0x22FFFFFF)
+            }
+            setOnClickListener {
+                if (tempPomodoroMinutes > 1) {
+                    tempPomodoroMinutes = (tempPomodoroMinutes - if (tempPomodoroMinutes > 10 && tempPomodoroMinutes % 5 == 0) 5 else 1).coerceAtLeast(1)
+                    updatePomodoroSettingUI(tempPomodoroMinutes)
+                }
+            }
+        }
+        stepperRow.addView(btnMinus)
+
+        val valueBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+
+        tvPomodoroDurationValue = TextView(this).apply {
+            text = "$pomodoroDurationMinutes"
+            textSize = 42f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            gravity = Gravity.CENTER
+        }
+        valueBox.addView(tvPomodoroDurationValue)
+
+        val tvUnit = TextView(this).apply {
+            text = "MINUTES"
+            textSize = 11f
+            alpha = 0.65f
+            letterSpacing = 0.10f
+            gravity = Gravity.CENTER
+        }
+        valueBox.addView(tvUnit)
+        stepperRow.addView(valueBox)
+
+        val btnPlus = TextView(this).apply {
+            text = "＋"
+            textSize = 24f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            val btnSize = (44 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 14f * density
+                setColor(0x22FFFFFF)
+            }
+            setOnClickListener {
+                if (tempPomodoroMinutes < 120) {
+                    tempPomodoroMinutes = (tempPomodoroMinutes + if (tempPomodoroMinutes >= 10 && tempPomodoroMinutes % 5 == 0) 5 else 1).coerceAtMost(120)
+                    updatePomodoroSettingUI(tempPomodoroMinutes)
+                }
+            }
+        }
+        stepperRow.addView(btnPlus)
+        pomodoroDialogCard.addView(stepperRow)
+
+        // 3. 快捷预设按钮组：15m, 25m, 35m, 45m, 60m
+        val tvPresetLabel = TextView(this).apply {
+            text = "常用专注推荐"
+            textSize = 12f
+            alpha = 0.7f
+            setPadding(0, (14 * density).toInt(), 0, (8 * density).toInt())
+        }
+        pomodoroDialogCard.addView(tvPresetLabel)
+
+        val presetsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        pomodoroPresetButtons.clear()
+        val presets = listOf(15, 25, 35, 45, 60)
+        presets.forEach { presetMin ->
+            val btnPreset = TextView(this).apply {
+                text = "${presetMin}分"
+                textSize = 13f
+                gravity = Gravity.CENTER
+                val padH = (8 * density).toInt()
+                val padV = (8 * density).toInt()
+                setPadding(padH, padV, padH, padV)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f).apply {
+                    val margin = (3 * density).toInt()
+                    setMargins(margin, 0, margin, 0)
+                }
+                setOnClickListener {
+                    tempPomodoroMinutes = presetMin
+                    updatePomodoroSettingUI(tempPomodoroMinutes)
+                }
+            }
+            pomodoroPresetButtons.add(btnPreset)
+            presetsRow.addView(btnPreset)
+        }
+        pomodoroDialogCard.addView(presetsRow)
+
+        // 4. 底部确定并开始专注按钮
+        val btnConfirm = PillButton(this, "确定并开始").apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (46 * density).toInt()
+            ).apply {
+                topMargin = (20 * density).toInt()
+            }
+            setOnClickListener {
+                pomodoroDurationMinutes = tempPomodoroMinutes
+                pomodoroRemainingSeconds = pomodoroDurationMinutes * 60
+                isPomodoroRunning = true
+
+                if (!isPomodoroMode) {
+                    toggleClockMode()
+                } else {
+                    btnPomodoroToggle.setButtonText("暂停")
+                    tvFourPillars.text = "· 专注番茄钟 (点此改时长) ·"
+                    tvLunarAndDate.text = "$pomodoroDurationMinutes MINUTES FLOW STATE · 心流专注中"
+                    updatePomodoroDisplay(animate = false)
+                }
+                hidePomodoroSettingDialog()
+            }
+        }
+        pomodoroDialogCard.addView(btnConfirm)
+
+        pomodoroDialogOverlay.addView(pomodoroDialogCard)
+        rootContainer.addView(pomodoroDialogOverlay)
+    }
+
+    private fun showPomodoroSettingDialog() {
+        tempPomodoroMinutes = pomodoroDurationMinutes
+        updatePomodoroSettingUI(tempPomodoroMinutes)
+
+        val density = resources.displayMetrics.density
+        val pDialogBg = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = 24f * density
+            setColor(currentTheme.dialogBgColor)
+            setStroke((1.2f * density).toInt(), currentTheme.glassBorderTopLeft)
+        }
+        pomodoroDialogCard.background = pDialogBg
+
+        pomodoroDialogOverlay.visibility = View.VISIBLE
+        pomodoroDialogCard.scaleX = 0.95f
+        pomodoroDialogCard.scaleY = 0.95f
+        pomodoroDialogOverlay.animate()
+            .alpha(1f)
+            .setDuration(220)
+            .start()
+        pomodoroDialogCard.animate()
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(220)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun hidePomodoroSettingDialog() {
+        pomodoroDialogOverlay.animate()
+            .alpha(0f)
+            .setDuration(180)
+            .withEndAction {
+                pomodoroDialogOverlay.visibility = View.GONE
+            }
+            .start()
+    }
+
+    private fun updatePomodoroSettingUI(minutes: Int) {
+        tempPomodoroMinutes = minutes
+        tvPomodoroDurationValue.text = "$minutes"
+        tvPomodoroDurationValue.setTextColor(currentTheme.accentColor)
+
+        val presets = listOf(15, 25, 35, 45, 60)
+        val density = resources.displayMetrics.density
+        pomodoroPresetButtons.forEachIndexed { index, btn ->
+            val p = presets.getOrNull(index) ?: 25
+            val isSelected = (p == minutes)
+            btn.background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 12f * density
+                if (isSelected) {
+                    setColor(currentTheme.iconBgColor)
+                    setStroke((1.2f * density).toInt(), currentTheme.accentColor)
+                } else {
+                    setColor(0x22FFFFFF)
+                    setStroke(0, 0)
+                }
+            }
+            btn.setTextColor(if (isSelected) currentTheme.accentColor else currentTheme.textColor)
+            btn.typeface = if (isSelected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        }
+    }
+
+    /**
      * 调优时钟卡片尺寸与间距：横屏 28dp 间距、竖屏 24dp 间距，卡片比例 0.72，呼吸留白舒适
      */
     private fun resizeClockCards() {
@@ -878,8 +1192,8 @@ class MainActivity : AppCompatActivity() {
             cardSecond.visibility = View.VISIBLE
 
             pomodoroControlLayout.visibility = View.VISIBLE
-            tvFourPillars.text = "· 专注番茄钟 ·"
-            tvLunarAndDate.text = "25 MINUTES FLOW STATE"
+            tvFourPillars.text = "· 专注番茄钟 (点此改时长) ·"
+            tvLunarAndDate.text = "$pomodoroDurationMinutes MINUTES FLOW STATE · 点击时钟可自定时长"
 
             updatePomodoroDisplay(animate = false)
         } else {
@@ -901,9 +1215,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun resetPomodoro() {
         isPomodoroRunning = false
-        pomodoroRemainingSeconds = 25 * 60
+        pomodoroRemainingSeconds = pomodoroDurationMinutes * 60
         btnPomodoroToggle.setButtonText("开始")
-        tvLunarAndDate.text = "已重置为 25 分钟专注"
+        tvLunarAndDate.text = "已重置为 $pomodoroDurationMinutes 分钟专注 · 点此可改时长"
         updatePomodoroDisplay(animate = false)
     }
 
@@ -985,6 +1299,16 @@ class MainActivity : AppCompatActivity() {
         }
         radioDialogCard.background = dialogBg
         updateRadioDialogList()
+
+        if (::pomodoroDialogCard.isInitialized) {
+            val pDialogBg = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 24f * density
+                setColor(theme.dialogBgColor)
+                setStroke((1.2f * density).toInt(), theme.glassBorderTopLeft)
+            }
+            pomodoroDialogCard.background = pDialogBg
+            updatePomodoroSettingUI(tempPomodoroMinutes)
+        }
 
         if (showToast) {
             tvThemeToast.text = "配色：${theme.title}"
@@ -1465,6 +1789,12 @@ class FlipCardView @JvmOverloads constructor(
     private val seamPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         isAntiAlias = true
     }
+    // 翻转卡片内侧实色不透光遮罩 Paint，彻底阻断半透明毛玻璃背景下的透视重影
+    private val solidMaskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isAntiAlias = true
+        isFilterBitmap = true
+        style = Paint.Style.FILL
+    }
 
     private val camera = Camera()
     private val transformMatrix = Matrix()
@@ -1563,7 +1893,7 @@ class FlipCardView @JvmOverloads constructor(
             // 1. 静态上半部 (当前数字)
             canvas.save()
             canvas.clipRect(0f, 0f, w, centerY - slitHalf)
-            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true)
+            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true, isOpaque = false)
             textPaint.color = currentTheme.textColor
             canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
             canvas.restore()
@@ -1571,7 +1901,7 @@ class FlipCardView @JvmOverloads constructor(
             // 2. 静态下半部 (当前数字)
             canvas.save()
             canvas.clipRect(0f, centerY + slitHalf, w, h)
-            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false)
+            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false, isOpaque = false)
             textPaint.color = currentTheme.textColor
             canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
             canvas.restore()
@@ -1581,24 +1911,25 @@ class FlipCardView @JvmOverloads constructor(
             return
         }
 
-        // ==================== 翻转过渡期间（0f < progress < 1f）====================
-        // 采用远焦视距参数 -48f * density（彻底消除近景透视失真导致的拉伸降采样模糊与发虚）
+        // ==================== 严格四半区物理遮蔽结构（0f < progress < 1f）====================
         val cameraDistance = -48f * density
 
-        // 1. 底层上半部 (展开的新数字底板)
+        // 1. 上半区静止底板：翻页一开始，立即绘制【新数字】上半部，待上方旧叶片翻落后完整展现
         canvas.save()
         canvas.clipRect(0f, 0f, w, centerY - slitHalf)
-        drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true)
+        drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true, isOpaque = false)
         textPaint.color = currentTheme.textColor
         canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
         canvas.restore()
 
-        // 2. 底层下半部 (旧数字底板)
+        // 2. 下半区静止底板：翻页一开始（progress > 0.05f），【旧数字】下半部立即隐去，换为纯深色底板，杜绝透光重影
         canvas.save()
         canvas.clipRect(0f, centerY + slitHalf, w, h)
-        drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false)
-        textPaint.color = currentTheme.textColor
-        canvas.drawText(oldValue, w / 2f, textBaseline, textPaint)
+        drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false, isOpaque = false)
+        if (flipProgress <= 0.05f) {
+            textPaint.color = currentTheme.textColor
+            canvas.drawText(oldValue, w / 2f, textBaseline, textPaint)
+        }
 
         // 底板落影 (前半程逐渐加深)
         if (flipProgress < 0.5f) {
@@ -1608,9 +1939,9 @@ class FlipCardView @JvmOverloads constructor(
         }
         canvas.restore()
 
-        // 3. 顶层 3D 旋转活动卡片 (Flap)
+        // 3. 顶层 3D 旋转活动卡片 (Flap，内侧绘制实色不透光遮罩，消除半透明穿帮)
         if (flipProgress < 0.5f) {
-            // 前半程：旧数字上半叶重力下折叠 (0° -> -90°)
+            // 前半程：旧数字上半叶重力下折叠 (0° -> -90°)，只绘制【旧数字】上半部
             val phaseProgress = flipProgress / 0.5f
             val degree = phaseProgress * 90f
 
@@ -1626,7 +1957,8 @@ class FlipCardView @JvmOverloads constructor(
             canvas.concat(transformMatrix)
 
             canvas.clipRect(0f, 0f, w, centerY - slitHalf)
-            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true)
+            // 绘制实色不透光遮罩底板
+            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true, isOpaque = true)
             textPaint.color = currentTheme.textColor
             canvas.drawText(oldValue, w / 2f, textBaseline, textPaint)
 
@@ -1636,7 +1968,7 @@ class FlipCardView @JvmOverloads constructor(
             canvas.drawRect(0f, 0f, w, centerY - slitHalf, shadowPaint)
             canvas.restore()
         } else {
-            // 后半程：新数字下半叶展开卡扣归位 (90° -> 0°)
+            // 后半程：新数字下半叶展开卡扣归位 (90° -> 0°)，只绘制【新数字】下半部
             val phaseProgress = (flipProgress - 0.5f) / 0.5f
             val degree = 90f - phaseProgress * 90f
 
@@ -1652,7 +1984,8 @@ class FlipCardView @JvmOverloads constructor(
             canvas.concat(transformMatrix)
 
             canvas.clipRect(0f, centerY + slitHalf, w, h)
-            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false)
+            // 绘制实色不透光遮罩底板
+            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false, isOpaque = true)
             textPaint.color = currentTheme.textColor
             canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
 
@@ -1684,9 +2017,27 @@ class FlipCardView @JvmOverloads constructor(
 
     /**
      * 绘制带有微透高斯毛玻璃渐变与斜向液态折射高光边框的半叶卡片
+     * @param isOpaque 是否开启实色不透光遮罩（活动翻片开启，防止透过半透明底板看穿底层静态数字）
      */
-    private fun drawLiquidGlassCardHalf(canvas: Canvas, w: Float, h: Float, radius: Float, isTop: Boolean) {
+    private fun drawLiquidGlassCardHalf(
+        canvas: Canvas,
+        w: Float,
+        h: Float,
+        radius: Float,
+        isTop: Boolean,
+        isOpaque: Boolean = false
+    ) {
         cardRect.set(0f, 0f, w, h)
+
+        if (isOpaque) {
+            // 实色不透光基底：彻底阻断透光穿帮
+            solidMaskPaint.color = Color.rgb(
+                Color.red(currentTheme.cardTopBg),
+                Color.green(currentTheme.cardTopBg),
+                Color.blue(currentTheme.cardTopBg)
+            )
+            canvas.drawRoundRect(cardRect, radius, radius, solidMaskPaint)
+        }
 
         // 1. 半透明微透毛玻璃底色
         val glassShader = if (isTop) {
