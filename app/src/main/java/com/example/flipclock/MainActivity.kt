@@ -851,10 +851,8 @@ object RadioManager {
     private var currentIndex = 0
     private var mediaPlayer: MediaPlayer? = null
 
-    var isPlaying = false
-        private set
-    var isLoading = false
-        private set
+    var isPlaying: Boolean = false
+    var isLoading: Boolean = false
 
     var onStateChangedListener: (() -> Unit)? = null
 
@@ -910,8 +908,8 @@ object RadioManager {
         currentIndex = (index % stations.size + stations.size) % stations.size
         val station = stations[currentIndex]
 
-        isLoading = true
-        isPlaying = false
+        RadioManager.isLoading = true
+        RadioManager.isPlaying = false
         onStateChangedListener?.invoke()
 
         try {
@@ -923,47 +921,47 @@ object RadioManager {
         }
 
         if (mediaPlayer == null) {
-            mediaPlayer = MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .build()
-                )
-                setOnPreparedListener { mp ->
-                    isLoading = false
-                    isPlaying = true
-                    mp.start()
-                    onStateChangedListener?.invoke()
-                }
-                setOnErrorListener { _, _, _ ->
-                    isLoading = false
-                    isPlaying = false
-                    onStateChangedListener?.invoke()
-                    true
-                }
+            val player = MediaPlayer()
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            player.setOnPreparedListener { mp ->
+                RadioManager.isLoading = false
+                RadioManager.isPlaying = true
+                mp.start()
+                RadioManager.onStateChangedListener?.invoke()
             }
+            player.setOnErrorListener { _, _, _ ->
+                RadioManager.isLoading = false
+                RadioManager.isPlaying = false
+                RadioManager.onStateChangedListener?.invoke()
+                true
+            }
+            mediaPlayer = player
         }
 
         try {
             mediaPlayer?.setDataSource(station.streamUrl)
             mediaPlayer?.prepareAsync()
         } catch (e: Exception) {
-            isLoading = false
-            isPlaying = false
+            RadioManager.isLoading = false
+            RadioManager.isPlaying = false
             onStateChangedListener?.invoke()
         }
     }
 
     fun togglePlayPause() {
         val mp = mediaPlayer
-        if (mp != null && isPlaying) {
+        if (mp != null && RadioManager.isPlaying) {
             mp.pause()
-            isPlaying = false
+            RadioManager.isPlaying = false
             onStateChangedListener?.invoke()
-        } else if (mp != null && !isPlaying && !isLoading) {
+        } else if (mp != null && !RadioManager.isPlaying && !RadioManager.isLoading) {
             mp.start()
-            isPlaying = true
+            RadioManager.isPlaying = true
             onStateChangedListener?.invoke()
         } else {
             play(currentIndex)
@@ -979,8 +977,8 @@ object RadioManager {
             mediaPlayer?.release()
             mediaPlayer = null
         } catch (_: Exception) {}
-        isPlaying = false
-        isLoading = false
+        RadioManager.isPlaying = false
+        RadioManager.isLoading = false
     }
 }
 
