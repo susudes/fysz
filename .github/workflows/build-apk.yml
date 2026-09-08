@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Debug APK
@@ -50,3 +53,18 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish to GitHub Releases
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Deleting previous latest release and tag if exist..."
+          gh release delete latest --cleanup-tag --yes || true
+
+          echo "Creating new latest release and uploading app-debug.apk..."
+          gh release create latest app/build/outputs/apk/debug/app-debug.apk \
+            --title "Latest Build" \
+            --notes "由 GitHub Actions 自动编译构建产物 (Commit: ${{ github.sha }})" \
+            --latest
