@@ -104,6 +104,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var radioControlBar: RadioControlBarLayout
     private lateinit var radioStationDialogOverlay: FrameLayout
     private lateinit var radioDialogCard: LinearLayout
+    private lateinit var radioDialogScrollView: ScrollView
     private lateinit var radioStationsContainer: LinearLayout
     private lateinit var tvDialogStationCount: TextView
 
@@ -506,7 +507,7 @@ class MainActivity : AppCompatActivity() {
         titleBox.addView(tvDialogTitle)
 
         tvDialogStationCount = TextView(this).apply {
-            text = "共 ${RadioManager.getStationCount()} 个电台 · 点击即刻收听"
+            text = "中国电台 (已加载 ${RadioManager.getStationCount()} 个) · 点击即刻收听"
             textSize = 11.5f
             alpha = 0.75f
             setPadding(0, (2 * density).toInt(), 0, 0)
@@ -535,13 +536,14 @@ class MainActivity : AppCompatActivity() {
         }
         radioDialogCard.addView(divider)
 
-        // 可滑动的电台列表容器
-        val scrollView = ScrollView(this).apply {
+        // 可滑动的电台列表容器 (支持 200+ 电台平滑滚动)
+        radioDialogScrollView = ScrollView(this).apply {
             val maxH = (340 * density).toInt()
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 maxH
             )
+            isVerticalScrollBarEnabled = true
         }
 
         radioStationsContainer = LinearLayout(this).apply {
@@ -552,8 +554,8 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        scrollView.addView(radioStationsContainer)
-        radioDialogCard.addView(scrollView)
+        radioDialogScrollView.addView(radioStationsContainer)
+        radioDialogCard.addView(radioDialogScrollView)
 
         radioStationDialogOverlay.addView(radioDialogCard)
         rootContainer.addView(radioStationDialogOverlay)
@@ -562,13 +564,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 刷新并填充电台频道列表弹窗项
+     * 刷新并填充电台频道列表弹窗项（包含电台流格式与码率标签）
      */
     private fun updateRadioDialogList() {
         radioStationsContainer.removeAllViews()
         val stations = RadioManager.getStations()
         val density = resources.displayMetrics.density
-        tvDialogStationCount.text = "共 ${stations.size} 个电台 · 点击即刻收听"
+        tvDialogStationCount.text = "中国电台 (已加载 ${stations.size} 个) · 点击即刻收听"
 
         stations.forEachIndexed { index, station ->
             val isCurrent = (index == RadioManager.getCurrentIndex())
@@ -577,7 +579,7 @@ class MainActivity : AppCompatActivity() {
             val itemView = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                val padV = (10 * density).toInt()
+                val padV = (9 * density).toInt()
                 val padH = (12 * density).toInt()
                 setPadding(padH, padV, padH, padV)
                 layoutParams = LinearLayout.LayoutParams(
@@ -615,11 +617,16 @@ class MainActivity : AppCompatActivity() {
                 typeface = Typeface.MONOSPACE
                 alpha = if (isCurrent) 1f else 0.5f
                 setTextColor(if (isCurrent) currentTheme.accentColor else currentTheme.subTextColor)
-                layoutParams = LinearLayout.LayoutParams((32 * density).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
+                layoutParams = LinearLayout.LayoutParams((34 * density).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
             }
             itemView.addView(tvIndex)
 
-            // 电台名称
+            // 中间信息列：名称 + 流格式/码率标签
+            val infoLayout = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+            }
+
             val tvStationTitle = TextView(this).apply {
                 text = station.name
                 textSize = 14f
@@ -627,9 +634,19 @@ class MainActivity : AppCompatActivity() {
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 typeface = if (isCurrent) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                 setTextColor(if (isCurrent) currentTheme.accentColor else currentTheme.textColor)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
             }
-            itemView.addView(tvStationTitle)
+            infoLayout.addView(tvStationTitle)
+
+            val tvStationTag = TextView(this).apply {
+                text = station.tag
+                textSize = 10.5f
+                alpha = if (isCurrent) 0.85f else 0.6f
+                setTextColor(if (isCurrent) currentTheme.accentColor else currentTheme.subTextColor)
+                setPadding(0, (2 * density).toInt(), 0, 0)
+            }
+            infoLayout.addView(tvStationTag)
+
+            itemView.addView(infoLayout)
 
             // 状态徽标
             val tvBadge = TextView(this).apply {
@@ -642,6 +659,7 @@ class MainActivity : AppCompatActivity() {
                 textSize = 11.5f
                 setTextColor(if (isCurrent) currentTheme.accentColor else currentTheme.subTextColor)
                 alpha = if (isCurrent) 1f else 0.7f
+                setPadding((6 * density).toInt(), 0, 0, 0)
             }
             itemView.addView(tvBadge)
 
@@ -650,6 +668,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showRadioStationDialog() {
+        val density = resources.displayMetrics.density
+        val screenH = resources.displayMetrics.heightPixels
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val maxScrollH = if (isLandscape) {
+            (screenH * 0.46f).toInt().coerceAtLeast((160 * density).toInt())
+        } else {
+            (screenH * 0.50f).toInt().coerceIn((240 * density).toInt(), (380 * density).toInt())
+        }
+        val lp = radioDialogScrollView.layoutParams
+        lp.height = maxScrollH
+        radioDialogScrollView.layoutParams = lp
+
         updateRadioDialogList()
         radioStationDialogOverlay.visibility = View.VISIBLE
         radioDialogCard.scaleX = 0.95f
@@ -677,7 +707,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 适度调小时钟尺寸，横屏占高 48%~52% 左右，卡片间纯净间距 18dp（无冒号）
+     * 调优时钟卡片尺寸与间距：横屏 28dp 间距、竖屏 24dp 间距，卡片比例 0.72，呼吸留白舒适
      */
     private fun resizeClockCards() {
         val w = rootContainer.width
@@ -689,7 +719,8 @@ class MainActivity : AppCompatActivity() {
 
         val cardHeight: Int
         val cardWidth: Int
-        val spacing = (18 * density).toInt()
+        // 显著拉大间距：横屏 28dp，竖屏 24dp，排版更舒展
+        val spacing = if (isLandscape) (28 * density).toInt() else (24 * density).toInt()
 
         val numCards = if (isPomodoroMode) 2 else 3
 
@@ -699,7 +730,7 @@ class MainActivity : AppCompatActivity() {
             var targetW = (targetH * 0.72f).toInt()
 
             val totalReqWidth = numCards * targetW + (numCards - 1) * spacing
-            val maxAllowedWidth = (w * 0.86f).toInt()
+            val maxAllowedWidth = (w * 0.88f).toInt()
 
             if (totalReqWidth > maxAllowedWidth) {
                 val scale = maxAllowedWidth.toFloat() / totalReqWidth
@@ -709,7 +740,7 @@ class MainActivity : AppCompatActivity() {
             cardHeight = targetH
             cardWidth = targetW
         } else {
-            // 竖屏模式：横向三卡片舒展对齐，卡片间距 16dp
+            // 竖屏模式：横向三卡片舒展对齐，卡片间距 24dp，留足边距呼吸感
             val maxAllowedWidth = (w * 0.88f).toInt()
             val totalSpacing = (numCards - 1) * spacing
             val availableForCards = maxAllowedWidth - totalSpacing
@@ -717,7 +748,7 @@ class MainActivity : AppCompatActivity() {
             var targetW = (availableForCards / numCards)
             var targetH = (targetW / 0.72f).toInt()
 
-            val maxAllowedH = (h * 0.36f).toInt()
+            val maxAllowedH = (h * 0.35f).toInt()
             if (targetH > maxAllowedH) {
                 targetH = maxAllowedH
                 targetW = (targetH * 0.72f).toInt()
@@ -1067,16 +1098,17 @@ object CalendarAssetsManager {
 
 data class RadioStation(
     val name: String,
-    val streamUrl: String
+    val streamUrl: String,
+    val tag: String = "网络电台"
 )
 
 object RadioManager {
     private val DEFAULT_STATIONS = listOf(
-        RadioStation("CNR-1 中国之声", "https://lhttp.qtfm.cn/live/15318317/64k.mp3"),
-        RadioStation("经典音乐广播", "https://lhttp.qingting.fm/live/4804/64k.mp3"),
-        RadioStation("香港电台第一台 RTHK", "https://rthk.ice.infomaniak.ch/rthk1-64.mp3"),
-        RadioStation("Lofi 专注轻音乐", "https://streams.ilovemusic.de/iloveradio17.mp3"),
-        RadioStation("古典音乐台 (Swiss Classic)", "https://stream.srg-ssr.ch/m/rsc_de/mp3_128")
+        RadioStation("CNR-1 中国之声", "https://lhttp.qtfm.cn/live/15318317/64k.mp3", "MP3 · 64k · 央广"),
+        RadioStation("经典音乐广播", "https://lhttp.qingting.fm/live/4804/64k.mp3", "MP3 · 64k · 音乐"),
+        RadioStation("香港电台第一台 RTHK", "https://rthk.ice.infomaniak.ch/rthk1-64.mp3", "MP3 · 64k · 综合"),
+        RadioStation("Lofi 专注轻音乐", "https://streams.ilovemusic.de/iloveradio17.mp3", "MP3 · 128k · 治愈"),
+        RadioStation("古典音乐台 (Swiss Classic)", "https://stream.srg-ssr.ch/m/rsc_de/mp3_128", "MP3 · 128k · 古典")
     )
 
     private val stations = mutableListOf<RadioStation>().apply { addAll(DEFAULT_STATIONS) }
@@ -1099,43 +1131,60 @@ object RadioManager {
 
     fun fetchOnlineStations(onLoaded: (() -> Unit)? = null) {
         Executors.newSingleThreadExecutor().execute {
-            try {
-                val url = URL("https://de1.api.radio-browser.info/json/stations/bycountry/China?order=votes&reverse=true&limit=30")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    connectTimeout = 8000
-                    readTimeout = 8000
-                    setRequestProperty("User-Agent", "FlipClock-Radio/1.0")
-                }
-                if (conn.responseCode == HttpURLConnection.HTTP_OK) {
-                    val rawText = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    val jsonArray = JSONArray(rawText)
-                    val fetched = mutableListOf<RadioStation>()
-                    for (i in 0 until jsonArray.length()) {
-                        val obj = jsonArray.getJSONObject(i)
-                        val name = obj.optString("name").trim()
-                        val streamUrl = obj.optString("url_resolved").ifEmpty { obj.optString("url") }.trim()
-                        if (name.isNotEmpty() && streamUrl.startsWith("http")) {
-                            fetched.add(RadioStation(name, streamUrl))
-                        }
+            val endpoints = listOf(
+                "https://de1.api.radio-browser.info/json/stations/bycountry/China?order=clickcount&reverse=true&limit=250",
+                "https://nl1.api.radio-browser.info/json/stations/bycountry/China?order=clickcount&reverse=true&limit=250",
+                "https://at1.api.radio-browser.info/json/stations/bycountry/China?order=clickcount&reverse=true&limit=250"
+            )
+            for (endpoint in endpoints) {
+                try {
+                    val url = URL(endpoint)
+                    val conn = (url.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 8000
+                        readTimeout = 8000
+                        setRequestProperty("User-Agent", "FlipClock-Radio/1.0")
                     }
-                    if (fetched.isNotEmpty()) {
-                        synchronized(stations) {
-                            val urlSet = stations.map { it.streamUrl }.toMutableSet()
-                            for (s in fetched) {
-                                if (urlSet.add(s.streamUrl)) {
-                                    stations.add(s)
-                                }
+                    if (conn.responseCode == HttpURLConnection.HTTP_OK) {
+                        val rawText = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        val jsonArray = JSONArray(rawText)
+                        val fetched = mutableListOf<RadioStation>()
+                        for (i in 0 until jsonArray.length()) {
+                            val obj = jsonArray.getJSONObject(i)
+                            val name = obj.optString("name").trim()
+                            val streamUrl = obj.optString("url_resolved").ifEmpty { obj.optString("url") }.trim()
+                            var codec = obj.optString("codec").trim().uppercase(Locale.ROOT)
+                            if (codec == "UNKNOWN") codec = ""
+                            val bitrate = obj.optInt("bitrate", 0)
+                            val tag = when {
+                                codec.isNotEmpty() && bitrate > 0 -> "$codec · ${bitrate}k"
+                                codec.isNotEmpty() -> codec
+                                bitrate > 0 -> "${bitrate}k"
+                                else -> "网络流"
+                            }
+                            if (name.isNotEmpty() && streamUrl.startsWith("http")) {
+                                fetched.add(RadioStation(name, streamUrl, tag))
                             }
                         }
-                        Handler(Looper.getMainLooper()).post {
-                            onStateChangedListener?.invoke()
-                            onLoaded?.invoke()
+                        if (fetched.isNotEmpty()) {
+                            synchronized(stations) {
+                                val urlSet = stations.map { it.streamUrl }.toMutableSet()
+                                for (s in fetched) {
+                                    if (urlSet.add(s.streamUrl)) {
+                                        stations.add(s)
+                                    }
+                                }
+                            }
+                            Handler(Looper.getMainLooper()).post {
+                                onStateChangedListener?.invoke()
+                                onLoaded?.invoke()
+                            }
+                            break
                         }
                     }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
         }
     }
@@ -1367,19 +1416,31 @@ class FlipCardView @JvmOverloads constructor(
 
     private var currentTheme: ThemeMode = ThemeMode.DARK_VINTAGE
 
-    private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isAntiAlias = true
+        isFilterBitmap = true
+    }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isAntiAlias = true
+        isFilterBitmap = true
         style = Paint.Style.STROKE
     }
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+        isAntiAlias = true
+        isSubpixelText = true
+        isFilterBitmap = true
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
     }
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isAntiAlias = true
+        isFilterBitmap = true
         style = Paint.Style.FILL
         color = Color.BLACK
     }
-    private val seamPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val seamPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isAntiAlias = true
+    }
 
     private val camera = Camera()
     private val transformMatrix = Matrix()
@@ -1436,11 +1497,13 @@ class FlipCardView @JvmOverloads constructor(
         val centerY = h / 2f
         val slitHalf = 1.0f * density
 
-        textPaint.textSize = h * 0.62f
+        // 现代利落无衬线粗体，适度收紧字体尺寸至 0.58f，在毛玻璃卡片内留足舒适呼吸留白
+        textPaint.textSize = h * 0.58f
         val fontMetrics = textPaint.fontMetrics
         val textBaseline = centerY - (fontMetrics.descent + fontMetrics.ascent) / 2f
 
-        val cameraDistance = -14f * density
+        // 采用远焦视距参数 -48f * density（彻底消除近景透视失真导致的拉伸降采样模糊与发虚）
+        val cameraDistance = -48f * density
 
         // 1. 底层上半部 (展开的新数字)
         canvas.save()
