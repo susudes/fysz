@@ -33,6 +33,7 @@ import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
@@ -50,17 +51,19 @@ import java.util.concurrent.Executors
 import java.util.zip.GZIPInputStream
 
 /**
- * 现代、极简、无冗余依赖的纯 Kotlin 原生 Android 拟物翻页时钟 (全面重构升级版)
+ * 现代、极简、无冗余依赖的纯 Kotlin 原生 Android 液态毛玻璃（Glassmorphism）翻页时钟
  *
- * 核心架构重构特性：
- * 1. 权威万年历数据对接：直接从 assets/2021-2040.md 异步匹配当日权威干支四柱与农历月日
- * 2. 界面解耦与呼吸感排版：
- *    - 顶部栏精简：左侧仅展示【东营区 · 多云 19°C】，右侧水平排列四大半透明图标 (横竖屏、电台、番茄、换色)，带 24dp 防遮挡内边距
- *    - 时钟适度缩小：比例调优至屏幕高度约 48%~52%，留白充裕
- *    - 四柱下移居中：【干支四柱】与【农历公历】优雅置于翻页时钟正下方居中展示
- * 3. 原生集成 Radio Browser 中文网络电台：
- *    - 原生 MediaPlayer 后台音频流播放，内置保底经典电台并后台异步拉取 Radio Browser 中国区热门电台
- *    - 点击顶部 📻 按钮滑出半透明悬浮电台控制条 (切台、播控、状态显示)，随主题自适应配色
+ * 视觉与功能核心改版：
+ * 1. 彻底去除时间冒号：呈现纯粹纯净的 "XX  XX  XX" 现代时钟画风，水平留白匀称。
+ * 2. 界面重心优雅下移：消除顶部拥挤与底部空旷，大幅提升空间呼吸感。
+ * 3. 顶部天气升级：【东营区 · 多云 19°C】加粗放大至 16.5sp，清晰醒目。
+ * 4. 全新液态毛玻璃风（Liquid Glass）：
+ *    - 半透明通透毛玻璃底板（随主题智能透色）
+ *    - 1dp 斜向渐变液态折射高光边框（模拟玻璃倒角聚光）
+ *    - 18dp 现代化大圆角，极细水平微光接缝，移除生硬转轴钉
+ *    - 纯白纯净现代高反差数字
+ * 5. 电台频道列表毛玻璃弹窗（Radio Station Dialog）：
+ *    - 支持即时唤出全量电台滑动列表，包含实时播放状态高亮、点击即切即播
  */
 class MainActivity : AppCompatActivity() {
 
@@ -75,14 +78,12 @@ class MainActivity : AppCompatActivity() {
     private var isPomodoroRunning = false
 
     // 天气缓存状态
-    private var weatherDisplayString = "东营区 · 天气加载中..."
+    private var weatherDisplayString = "东营区 · 多云 19°C"
     private val backgroundExecutor = Executors.newSingleThreadExecutor()
 
-    // 翻牌卡片与分隔符控件
+    // 翻牌卡片引用（已彻底移除 ColonView 冒号）
     private lateinit var cardHour: FlipCardView
-    private lateinit var cardColon1: ColonView
     private lateinit var cardMinute: FlipCardView
-    private lateinit var cardColon2: ColonView
     private lateinit var cardSecond: FlipCardView
     private lateinit var clockRow: LinearLayout
 
@@ -99,8 +100,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvFourPillars: TextView
     private lateinit var tvLunarAndDate: TextView
 
-    // 悬浮电台控制条
+    // 悬浮电台控制条与电台弹窗
     private lateinit var radioControlBar: RadioControlBarLayout
+    private lateinit var radioStationDialogOverlay: FrameLayout
+    private lateinit var radioDialogCard: LinearLayout
+    private lateinit var radioStationsContainer: LinearLayout
+    private lateinit var tvDialogStationCount: TextView
 
     // 底部番茄钟控制条
     private lateinit var pomodoroControlLayout: LinearLayout
@@ -133,24 +138,28 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 1. 保持全时屏幕常亮
+        // 1. 全时屏幕常亮
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         // 2. 隐藏状态栏全屏沉浸
         hideSystemUI()
 
-        // 3. 构建无 XML 依赖的纯 Kotlin 原生响应式布局
+        // 3. 构建液态毛玻璃响应式布局
         setupUI()
 
-        // 4. 初始化应用当前配色主题
+        // 4. 应用默认主题
         applyTheme(currentTheme, showToast = false)
         updateClockData(animate = false)
 
-        // 5. 启动天气更新与网络电台异步拉取
+        // 5. 启动天气轮询与电台数据拉取
         mainHandler.post(weatherRefreshRunnable)
-        RadioManager.fetchOnlineStations()
+        RadioManager.fetchOnlineStations {
+            mainHandler.post {
+                updateRadioDialogList()
+            }
+        }
 
-        // 6. 底部触控提示 3 秒后优雅淡出
+        // 6. 底部提示 3 秒后优雅淡出
         mainHandler.postDelayed({
             tvBottomHint.animate().alpha(0f).setDuration(800).start()
         }, 3000)
@@ -194,7 +203,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 搭建解耦重构后的极简 UI 结构
+     * 搭建视觉平衡与解耦重构的 UI 层次结构
      */
     @SuppressLint("ClickableViewAccessibility")
     private fun setupUI() {
@@ -224,19 +233,23 @@ class MainActivity : AppCompatActivity() {
 
         rootContainer.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_UP) {
-                switchNextTheme()
+                // 如果电台弹窗正在显示，点击背景关闭弹窗；否则切换主题
+                if (radioStationDialogOverlay.visibility == View.VISIBLE) {
+                    hideRadioStationDialog()
+                } else {
+                    switchNextTheme()
+                }
             }
             true
         }
 
         // ---------------------------------------------------------------------------------
-        // 1. 顶部解耦状态栏（左侧：精简天气，右侧：四大操作图标，右内边距 24dp 彻底防遮挡）
+        // 1. 顶部解耦状态栏（左：加粗大字号天气，右：四大功能图标，右内边距 24dp 彻底防遮挡）
         // ---------------------------------------------------------------------------------
         topBarLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            // paddingRight = 24dp 保证图标绝不被圆角或系统边缘切角遮挡
-            setPadding((20 * density).toInt(), (14 * density).toInt(), (24 * density).toInt(), (8 * density).toInt())
+            setPadding((22 * density).toInt(), (16 * density).toInt(), (24 * density).toInt(), (10 * density).toInt())
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -244,11 +257,11 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        // 左侧：精简天气（如：东营区 · 多云 19°C）
+        // 左侧：加粗、加大字号天气显示（16.5sp，清晰醒目）
         tvWeather = TextView(this).apply {
-            textSize = 13f
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
-            letterSpacing = 0.04f
+            textSize = 16.5f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            letterSpacing = 0.03f
             maxLines = 1
             text = weatherDisplayString
             setOnClickListener { manualRefreshWeather() }
@@ -288,18 +301,22 @@ class MainActivity : AppCompatActivity() {
         rootContainer.addView(topBarLayout)
 
         // ---------------------------------------------------------------------------------
-        // 2. 中央核心内容区（时钟 + 下方居中四柱与农历 + 悬浮电台控制条）
+        // 2. 中央核心内容区（重心微调下移，垂直居中增加 topMargin 留白平衡）
         // ---------------------------------------------------------------------------------
         val centerContentWrapper = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
+            gravity = Gravity.CENTER_HORIZONTAL
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER
+            ).apply {
+                // 整体重心微调下移 32dp，平衡上下留白
+                topMargin = (32 * density).toInt()
+            }
         }
 
-        // A. 翻牌时钟横向卡片容器
+        // A. 纯净无冒号翻牌时钟横向卡片容器 (XX   XX   XX)
         clockRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -310,23 +327,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         cardHour = FlipCardView(this)
-        cardColon1 = ColonView(this)
         cardMinute = FlipCardView(this)
-        cardColon2 = ColonView(this)
         cardSecond = FlipCardView(this)
 
         clockRow.addView(cardHour)
-        clockRow.addView(cardColon1)
         clockRow.addView(cardMinute)
-        clockRow.addView(cardColon2)
         clockRow.addView(cardSecond)
         centerContentWrapper.addView(clockRow)
 
-        // B. 四柱与农历信息区：下移至时钟正下方居中排版，呼吸感拉满
+        // B. 四柱与农历信息区：下移至时钟正下方居中排版
         pillarsInfoContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(0, (18 * density).toInt(), 0, 0)
+            setPadding(0, (22 * density).toInt(), 0, 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -347,7 +360,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             alpha = 0.85f
             letterSpacing = 0.05f
-            setPadding(0, (5 * density).toInt(), 0, 0)
+            setPadding(0, (6 * density).toInt(), 0, 0)
         }
         pillarsInfoContainer.addView(tvLunarAndDate)
         centerContentWrapper.addView(pillarsInfoContainer)
@@ -357,7 +370,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             visibility = View.GONE
-            setPadding(0, (16 * density).toInt(), 0, 0)
+            setPadding(0, (18 * density).toInt(), 0, 0)
         }
 
         btnPomodoroToggle = PillButton(this, "开始").apply {
@@ -374,18 +387,21 @@ class MainActivity : AppCompatActivity() {
         pomodoroControlLayout.addView(btnPomodoroReset)
         centerContentWrapper.addView(pomodoroControlLayout)
 
-        // D. 悬浮电台控制条 (点击 📻 图标弹出/隐藏)
+        // D. 悬浮毛玻璃电台控制条 (点击 📻 图标弹出/隐藏)
         radioControlBar = RadioControlBarLayout(this).apply {
             visibility = View.GONE
             alpha = 0f
             translationY = 20 * density
+            onOpenListClickListener = {
+                showRadioStationDialog()
+            }
         }
         centerContentWrapper.addView(radioControlBar)
 
         rootContainer.addView(centerContentWrapper)
 
         // ---------------------------------------------------------------------------------
-        // 3. 底部与提示图层
+        // 3. 底部提示 HUD
         // ---------------------------------------------------------------------------------
         tvBottomHint = TextView(this).apply {
             textSize = 12f
@@ -398,7 +414,7 @@ class MainActivity : AppCompatActivity() {
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             ).apply {
-                bottomMargin = (16 * density).toInt()
+                bottomMargin = (18 * density).toInt()
             }
         }
         rootContainer.addView(tvBottomHint)
@@ -419,7 +435,12 @@ class MainActivity : AppCompatActivity() {
         }
         rootContainer.addView(tvThemeToast)
 
-        // 布局变动自动自适应时钟尺寸
+        // ---------------------------------------------------------------------------------
+        // 4. 电台频道列表毛玻璃弹窗图层 (Radio Station Dialog Overlay)
+        // ---------------------------------------------------------------------------------
+        setupRadioStationDialog()
+
+        // 布局变动自动重算卡片尺寸
         rootContainer.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             resizeClockCards()
         }
@@ -428,7 +449,235 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 适度调小时钟尺寸，横屏占高 48%~52% 左右，留出充分的呼吸空间与四柱排版位
+     * 构建半透明毛玻璃电台列表弹窗视图
+     */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupRadioStationDialog() {
+        val density = resources.displayMetrics.density
+
+        radioStationDialogOverlay = FrameLayout(this).apply {
+            visibility = View.GONE
+            alpha = 0f
+            setBackgroundColor(0x88000000.toInt())
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_UP) {
+                    hideRadioStationDialog()
+                }
+                true
+            }
+        }
+
+        radioDialogCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val cardW = (350 * density).toInt()
+            val maxCardH = (460 * density).toInt()
+            layoutParams = FrameLayout.LayoutParams(cardW, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER).apply {
+                topMargin = (30 * density).toInt()
+                bottomMargin = (30 * density).toInt()
+            }
+            setPadding((20 * density).toInt(), (18 * density).toInt(), (20 * density).toInt(), (18 * density).toInt())
+            setOnTouchListener { _, _ -> true } // 消费卡片内部触碰
+        }
+
+        // 弹窗顶部栏：标题、频道计数与关闭按钮
+        val headerLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val titleBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+
+        val tvDialogTitle = TextView(this).apply {
+            text = "📻 广播电台频道"
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        titleBox.addView(tvDialogTitle)
+
+        tvDialogStationCount = TextView(this).apply {
+            text = "共 ${RadioManager.getStationCount()} 个电台 · 点击即刻收听"
+            textSize = 11.5f
+            alpha = 0.75f
+            setPadding(0, (2 * density).toInt(), 0, 0)
+        }
+        titleBox.addView(tvDialogStationCount)
+        headerLayout.addView(titleBox)
+
+        val btnClose = TextView(this).apply {
+            text = "✕"
+            textSize = 18f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            val p = (8 * density).toInt()
+            setPadding(p, p, p, p)
+            setOnClickListener { hideRadioStationDialog() }
+        }
+        headerLayout.addView(btnClose)
+        radioDialogCard.addView(headerLayout)
+
+        // 中部分割线
+        val divider = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).apply {
+                topMargin = (12 * density).toInt()
+                bottomMargin = (10 * density).toInt()
+            }
+        }
+        radioDialogCard.addView(divider)
+
+        // 可滑动的电台列表容器
+        val scrollView = ScrollView(this).apply {
+            val maxH = (340 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                maxH
+            )
+        }
+
+        radioStationsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        scrollView.addView(radioStationsContainer)
+        radioDialogCard.addView(scrollView)
+
+        radioStationDialogOverlay.addView(radioDialogCard)
+        rootContainer.addView(radioStationDialogOverlay)
+
+        updateRadioDialogList()
+    }
+
+    /**
+     * 刷新并填充电台频道列表弹窗项
+     */
+    private fun updateRadioDialogList() {
+        radioStationsContainer.removeAllViews()
+        val stations = RadioManager.getStations()
+        val density = resources.displayMetrics.density
+        tvDialogStationCount.text = "共 ${stations.size} 个电台 · 点击即刻收听"
+
+        stations.forEachIndexed { index, station ->
+            val isCurrent = (index == RadioManager.getCurrentIndex())
+            val isPlayingThis = isCurrent && RadioManager.isPlaying
+
+            val itemView = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                val padV = (10 * density).toInt()
+                val padH = (12 * density).toInt()
+                setPadding(padH, padV, padH, padV)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (4 * density).toInt()
+                }
+
+                // 选中态毛玻璃高光背景
+                val bg = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 12f * density
+                    if (isCurrent) {
+                        setColor(currentTheme.iconBgColor)
+                        setStroke((1 * density).toInt(), currentTheme.accentColor)
+                    } else {
+                        setColor(Color.TRANSPARENT)
+                    }
+                }
+                background = bg
+
+                setOnClickListener {
+                    RadioManager.play(index)
+                    hideRadioStationDialog()
+                    if (radioControlBar.visibility != View.VISIBLE) {
+                        toggleRadioControlBar()
+                    }
+                }
+            }
+
+            // 电台序号标签
+            val tvIndex = TextView(this).apply {
+                text = String.format(Locale.US, "#%02d", index + 1)
+                textSize = 12f
+                typeface = Typeface.MONOSPACE
+                alpha = if (isCurrent) 1f else 0.5f
+                setTextColor(if (isCurrent) currentTheme.accentColor else currentTheme.subTextColor)
+                layoutParams = LinearLayout.LayoutParams((32 * density).toInt(), LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+            itemView.addView(tvIndex)
+
+            // 电台名称
+            val tvStationTitle = TextView(this).apply {
+                text = station.name
+                textSize = 14f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                typeface = if (isCurrent) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                setTextColor(if (isCurrent) currentTheme.accentColor else currentTheme.textColor)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+            }
+            itemView.addView(tvStationTitle)
+
+            // 状态徽标
+            val tvBadge = TextView(this).apply {
+                text = when {
+                    isPlayingThis -> "● 正在直播"
+                    isCurrent && RadioManager.isLoading -> "⏳ 缓冲中"
+                    isCurrent -> "⏸ 暂停中"
+                    else -> "▶ 收听"
+                }
+                textSize = 11.5f
+                setTextColor(if (isCurrent) currentTheme.accentColor else currentTheme.subTextColor)
+                alpha = if (isCurrent) 1f else 0.7f
+            }
+            itemView.addView(tvBadge)
+
+            radioStationsContainer.addView(itemView)
+        }
+    }
+
+    private fun showRadioStationDialog() {
+        updateRadioDialogList()
+        radioStationDialogOverlay.visibility = View.VISIBLE
+        radioDialogCard.scaleX = 0.95f
+        radioDialogCard.scaleY = 0.95f
+        radioStationDialogOverlay.animate()
+            .alpha(1f)
+            .setDuration(220)
+            .start()
+        radioDialogCard.animate()
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(220)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
+    private fun hideRadioStationDialog() {
+        radioStationDialogOverlay.animate()
+            .alpha(0f)
+            .setDuration(180)
+            .withEndAction {
+                radioStationDialogOverlay.visibility = View.GONE
+            }
+            .start()
+    }
+
+    /**
+     * 适度调小时钟尺寸，横屏占高 48%~52% 左右，卡片间纯净间距 18dp（无冒号）
      */
     private fun resizeClockCards() {
         val w = rootContainer.width
@@ -440,64 +689,50 @@ class MainActivity : AppCompatActivity() {
 
         val cardHeight: Int
         val cardWidth: Int
-        val colonWidth: Int
-        val spacing = (8 * density).toInt()
+        val spacing = (18 * density).toInt()
 
         val numCards = if (isPomodoroMode) 2 else 3
-        val numColons = if (isPomodoroMode) 1 else 2
 
         if (isLandscape) {
-            // 横屏：卡片比例下调至屏幕高度 48%~52%，四周留白适度舒适
-            var targetH = (h * 0.50f).toInt()
+            // 横屏模式：卡片高度严格占高 48%~50%，无冒号更显宽阔纯净
+            var targetH = (h * 0.49f).toInt()
             var targetW = (targetH * 0.72f).toInt()
-            var targetColon = (targetH * 0.16f).toInt()
 
-            val totalReqWidth = numCards * targetW + numColons * targetColon + (numCards + numColons - 1) * spacing
-            val maxAllowedWidth = (w * 0.88f).toInt()
+            val totalReqWidth = numCards * targetW + (numCards - 1) * spacing
+            val maxAllowedWidth = (w * 0.86f).toInt()
 
             if (totalReqWidth > maxAllowedWidth) {
                 val scale = maxAllowedWidth.toFloat() / totalReqWidth
                 targetH = (targetH * scale).toInt()
                 targetW = (targetH * 0.72f).toInt()
-                targetColon = (targetH * 0.16f).toInt()
             }
             cardHeight = targetH
             cardWidth = targetW
-            colonWidth = targetColon
         } else {
-            // 竖屏：保持横向开阔，纵向紧凑精致
+            // 竖屏模式：横向三卡片舒展对齐，卡片间距 16dp
             val maxAllowedWidth = (w * 0.88f).toInt()
-            val totalSpacing = (numCards + numColons - 1) * spacing
+            val totalSpacing = (numCards - 1) * spacing
             val availableForCards = maxAllowedWidth - totalSpacing
 
-            val effectiveUnits = numCards + numColons * 0.22f
-            var targetW = (availableForCards / effectiveUnits).toInt()
+            var targetW = (availableForCards / numCards)
             var targetH = (targetW / 0.72f).toInt()
-            var targetColon = (targetW * 0.22f).toInt()
 
-            val maxAllowedH = (h * 0.38f).toInt()
+            val maxAllowedH = (h * 0.36f).toInt()
             if (targetH > maxAllowedH) {
                 targetH = maxAllowedH
                 targetW = (targetH * 0.72f).toInt()
-                targetColon = (targetW * 0.22f).toInt()
             }
             cardHeight = targetH
             cardWidth = targetW
-            colonWidth = targetColon
         }
 
-        listOf(cardHour, cardMinute, cardSecond).forEach { card ->
+        listOf(cardHour, cardMinute, cardSecond).forEachIndexed { index, card ->
             val lp = card.layoutParams as? LinearLayout.LayoutParams ?: LinearLayout.LayoutParams(cardWidth, cardHeight)
             lp.width = cardWidth
             lp.height = cardHeight
+            // 卡片之间增加优雅间距，首张无左边距
+            lp.leftMargin = if (index == 0) 0 else spacing
             card.layoutParams = lp
-        }
-
-        listOf(cardColon1, cardColon2).forEach { colon ->
-            val lp = colon.layoutParams as? LinearLayout.LayoutParams ?: LinearLayout.LayoutParams(colonWidth, cardHeight)
-            lp.width = colonWidth
-            lp.height = cardHeight
-            colon.layoutParams = lp
         }
 
         clockRow.requestLayout()
@@ -531,11 +766,9 @@ class MainActivity : AppCompatActivity() {
 
         val dateKey = String.format(Locale.US, "%04d-%02d-%02d", year, month, day)
 
-        // 1. 尝试从 assets/2021-2040.md 中提取权威干支历与农历
         val calInfo = CalendarAssetsManager.getDayInfo(this, dateKey)
 
         if (calInfo != null) {
-            // 根据当日天干与当前小时通过五鼠遁计算时柱
             val dayStemChar = calInfo.dayGz.firstOrNull() ?: '甲'
             val hourPillar = CalendarAssetsManager.calculateHourPillar(dayStemChar, hour)
 
@@ -544,7 +777,6 @@ class MainActivity : AppCompatActivity() {
             val termSuffix = if (calInfo.solarTerm.isNotEmpty()) " · 【${calInfo.solarTerm}】" else ""
             tvLunarAndDate.text = "${calInfo.lunar} · ${calInfo.weekday} · 【${calInfo.zodiac}年】$termSuffix"
         } else {
-            // 若超出范围，优雅回退至自研天文推算
             val pillars = GanzhiEngine.calculateFourPillars(cal)
             val lunarStr = LunarEngine.getLunarDateString(year, month, day)
             val sdf = SimpleDateFormat("yyyy年MM月dd日 EEEE", Locale.CHINESE)
@@ -552,7 +784,7 @@ class MainActivity : AppCompatActivity() {
             tvLunarAndDate.text = "$lunarStr · ${sdf.format(cal.time)} · 【${pillars.zodiac}年】"
         }
 
-        // 2. 刷新翻牌数字
+        // 刷新翻牌数字 (XX  XX  XX)
         val hStr = String.format(Locale.US, "%02d", hour)
         val mStr = String.format(Locale.US, "%02d", minute)
         val sStr = String.format(Locale.US, "%02d", second)
@@ -581,9 +813,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 切换收音机半透明控制条显示与隐藏
-     */
     private fun toggleRadioControlBar() {
         val isShowing = radioControlBar.visibility == View.VISIBLE
         btnRadio.setActive(!isShowing)
@@ -611,8 +840,6 @@ class MainActivity : AppCompatActivity() {
 
         if (isPomodoroMode) {
             cardHour.visibility = View.GONE
-            cardColon1.visibility = View.GONE
-            cardColon2.visibility = View.VISIBLE
             cardMinute.visibility = View.VISIBLE
             cardSecond.visibility = View.VISIBLE
 
@@ -625,8 +852,6 @@ class MainActivity : AppCompatActivity() {
             isPomodoroRunning = false
             btnPomodoroToggle.setButtonText("开始")
             cardHour.visibility = View.VISIBLE
-            cardColon1.visibility = View.VISIBLE
-            cardColon2.visibility = View.VISIBLE
             pomodoroControlLayout.visibility = View.GONE
 
             updateClockData(animate = false)
@@ -699,15 +924,13 @@ class MainActivity : AppCompatActivity() {
         val density = resources.displayMetrics.density
         rootContainer.invalidate()
 
-        tvWeather.setTextColor(theme.subTextColor)
+        tvWeather.setTextColor(theme.textColor)
         tvFourPillars.setTextColor(theme.textColor)
         tvLunarAndDate.setTextColor(theme.subTextColor)
         tvBottomHint.setTextColor(theme.subTextColor)
 
         cardHour.applyTheme(theme)
-        cardColon1.applyTheme(theme)
         cardMinute.applyTheme(theme)
-        cardColon2.applyTheme(theme)
         cardSecond.applyTheme(theme)
 
         btnRotate.applyTheme(theme)
@@ -719,6 +942,15 @@ class MainActivity : AppCompatActivity() {
         btnPomodoroReset.applyTheme(theme)
 
         radioControlBar.applyTheme(theme)
+
+        // 更新电台毛玻璃卡片背景与颜色
+        val dialogBg = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = 24f * density
+            setColor(theme.dialogBgColor)
+            setStroke((1.2f * density).toInt(), theme.glassBorderTopLeft)
+        }
+        radioDialogCard.background = dialogBg
+        updateRadioDialogList()
 
         if (showToast) {
             tvThemeToast.text = "配色：${theme.title}"
@@ -856,12 +1088,16 @@ object RadioManager {
 
     var onStateChangedListener: (() -> Unit)? = null
 
+    fun getStations(): List<RadioStation> = stations
+    fun getStationCount(): Int = stations.size
+    fun getCurrentIndex(): Int = currentIndex
+
     fun getCurrentStation(): RadioStation {
         if (currentIndex !in stations.indices) currentIndex = 0
         return stations[currentIndex]
     }
 
-    fun fetchOnlineStations() {
+    fun fetchOnlineStations(onLoaded: (() -> Unit)? = null) {
         Executors.newSingleThreadExecutor().execute {
             try {
                 val url = URL("https://de1.api.radio-browser.info/json/stations/bycountry/China?order=votes&reverse=true&limit=30")
@@ -894,6 +1130,7 @@ object RadioManager {
                         }
                         Handler(Looper.getMainLooper()).post {
                             onStateChangedListener?.invoke()
+                            onLoaded?.invoke()
                         }
                     }
                 }
@@ -983,7 +1220,7 @@ object RadioManager {
 }
 
 // =========================================================================================
-// 3. 悬浮电台控制条组件 (RadioControlBarLayout)
+// 3. 悬浮毛玻璃电台控制条组件 (RadioControlBarLayout)
 // =========================================================================================
 
 class RadioControlBarLayout(context: Context) : LinearLayout(context) {
@@ -995,6 +1232,8 @@ class RadioControlBarLayout(context: Context) : LinearLayout(context) {
     private val btnNext: TextView
     private var theme: ThemeMode = ThemeMode.DARK_VINTAGE
 
+    var onOpenListClickListener: (() -> Unit)? = null
+
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -1002,24 +1241,26 @@ class RadioControlBarLayout(context: Context) : LinearLayout(context) {
         setPadding((16 * density).toInt(), (8 * density).toInt(), (16 * density).toInt(), (8 * density).toInt())
 
         val lp = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-            topMargin = (16 * density).toInt()
+            topMargin = (18 * density).toInt()
             gravity = Gravity.CENTER_HORIZONTAL
         }
         layoutParams = lp
 
-        // 左侧电台收音机图标
+        // 左侧电台收音机图标（点击可弹出频道列表）
         val iconRadio = TextView(context).apply {
             text = "📻"
             textSize = 18f
             setPadding(0, 0, (10 * density).toInt(), 0)
+            setOnClickListener { onOpenListClickListener?.invoke() }
         }
         addView(iconRadio)
 
-        // 中部电台名与状态
+        // 中部电台名与状态（点击展开频道列表）
         val infoBox = LinearLayout(context).apply {
             orientation = VERTICAL
             gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LayoutParams((180 * density).toInt(), LayoutParams.WRAP_CONTENT)
+            layoutParams = LayoutParams((170 * density).toInt(), LayoutParams.WRAP_CONTENT)
+            setOnClickListener { onOpenListClickListener?.invoke() }
         }
 
         tvName = TextView(context).apply {
@@ -1035,7 +1276,7 @@ class RadioControlBarLayout(context: Context) : LinearLayout(context) {
             textSize = 11f
             alpha = 0.75f
             maxLines = 1
-            text = "点击播放"
+            text = "点击展开列表 ▾"
         }
         infoBox.addView(tvStatus)
         addView(infoBox)
@@ -1078,15 +1319,15 @@ class RadioControlBarLayout(context: Context) : LinearLayout(context) {
         tvName.text = s.name
         when {
             RadioManager.isLoading -> {
-                tvStatus.text = "电台连接缓冲中..."
+                tvStatus.text = "电台缓冲中... ▾"
                 btnToggle.text = "⏳"
             }
             RadioManager.isPlaying -> {
-                tvStatus.text = "● 正在直播"
+                tvStatus.text = "● 正在直播 ▾"
                 btnToggle.text = "⏸"
             }
             else -> {
-                tvStatus.text = "已暂停"
+                tvStatus.text = "已暂停 · 点此切台 ▾"
                 btnToggle.text = "▶"
             }
         }
@@ -1096,9 +1337,9 @@ class RadioControlBarLayout(context: Context) : LinearLayout(context) {
         this.theme = newTheme
         val density = resources.displayMetrics.density
         val bgDrawable = android.graphics.drawable.GradientDrawable().apply {
-            cornerRadius = 26f * density
+            cornerRadius = 24f * density
             setColor(theme.cardTopBg)
-            setStroke((1.2f * density).toInt(), theme.cardBorder)
+            setStroke((1.2f * density).toInt(), theme.glassBorderTopLeft)
         }
         background = bgDrawable
 
@@ -1111,7 +1352,7 @@ class RadioControlBarLayout(context: Context) : LinearLayout(context) {
 }
 
 // =========================================================================================
-// 4. 精细拟物 3D 折叠翻牌组件 (Canvas 3D + 顶光微亮 + 暗缝切线 + 左右铆钉转轴)
+// 4. 全新液态毛玻璃风（Liquid Glass）3D 折叠翻牌组件
 // =========================================================================================
 
 class FlipCardView @JvmOverloads constructor(
@@ -1127,17 +1368,18 @@ class FlipCardView @JvmOverloads constructor(
     private var currentTheme: ThemeMode = ThemeMode.DARK_VINTAGE
 
     private val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+    }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
-        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
     }
     private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.BLACK
     }
     private val seamPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val rivetPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     private val camera = Camera()
     private val transformMatrix = Matrix()
@@ -1172,7 +1414,7 @@ class FlipCardView @JvmOverloads constructor(
 
         animator?.cancel()
         animator = ValueAnimator.ofFloat(0.0f, 1.0f).apply {
-            duration = 450
+            duration = 440
             interpolator = DecelerateInterpolator(1.2f)
             addUpdateListener {
                 flipProgress = it.animatedValue as Float
@@ -1189,12 +1431,12 @@ class FlipCardView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val cornerRadius = h * 0.07f
-        val centerY = h / 2f
         val density = resources.displayMetrics.density
-        val slitHalf = 1.3f * density
+        val cornerRadius = 18f * density
+        val centerY = h / 2f
+        val slitHalf = 1.0f * density
 
-        textPaint.textSize = h * 0.64f
+        textPaint.textSize = h * 0.62f
         val fontMetrics = textPaint.fontMetrics
         val textBaseline = centerY - (fontMetrics.descent + fontMetrics.ascent) / 2f
 
@@ -1203,7 +1445,7 @@ class FlipCardView @JvmOverloads constructor(
         // 1. 底层上半部 (展开的新数字)
         canvas.save()
         canvas.clipRect(0f, 0f, w, centerY - slitHalf)
-        drawHalfCardBackground(canvas, w, h, cornerRadius, isTop = true)
+        drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true)
         textPaint.color = currentTheme.textColor
         canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
         canvas.restore()
@@ -1211,12 +1453,13 @@ class FlipCardView @JvmOverloads constructor(
         // 2. 底层下半部 (旧数字底板)
         canvas.save()
         canvas.clipRect(0f, centerY + slitHalf, w, h)
-        drawHalfCardBackground(canvas, w, h, cornerRadius, isTop = false)
+        drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false)
         textPaint.color = currentTheme.textColor
         canvas.drawText(oldValue, w / 2f, textBaseline, textPaint)
 
+        // 细腻的通透玻璃落影
         if (flipProgress < 0.5f) {
-            val shadowAlpha = (flipProgress * 2f * 120).toInt().coerceIn(0, 255)
+            val shadowAlpha = (flipProgress * 2f * 95).toInt().coerceIn(0, 255)
             shadowPaint.alpha = shadowAlpha
             canvas.drawRect(0f, centerY + slitHalf, w, h, shadowPaint)
         }
@@ -1237,11 +1480,11 @@ class FlipCardView @JvmOverloads constructor(
             canvas.concat(transformMatrix)
 
             canvas.clipRect(0f, 0f, w, centerY - slitHalf)
-            drawHalfCardBackground(canvas, w, h, cornerRadius, isTop = true)
+            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true)
             textPaint.color = currentTheme.textColor
             canvas.drawText(oldValue, w / 2f, textBaseline, textPaint)
 
-            val shadowAlpha = ((degree / 90f) * 150).toInt().coerceIn(0, 255)
+            val shadowAlpha = ((degree / 90f) * 110).toInt().coerceIn(0, 255)
             shadowPaint.alpha = shadowAlpha
             canvas.drawRect(0f, 0f, w, centerY - slitHalf, shadowPaint)
             canvas.restore()
@@ -1259,104 +1502,73 @@ class FlipCardView @JvmOverloads constructor(
             canvas.concat(transformMatrix)
 
             canvas.clipRect(0f, centerY + slitHalf, w, h)
-            drawHalfCardBackground(canvas, w, h, cornerRadius, isTop = false)
+            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false)
             textPaint.color = currentTheme.textColor
             canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
 
-            val shadowAlpha = ((degree / 90f) * 150).toInt().coerceIn(0, 255)
+            val shadowAlpha = ((degree / 90f) * 110).toInt().coerceIn(0, 255)
             shadowPaint.alpha = shadowAlpha
             canvas.drawRect(0f, centerY + slitHalf, w, h, shadowPaint)
             canvas.restore()
         }
 
-        // 4. 拟物暗缝切线与两端金属转轴钉
+        // 4. 极简轻微水平微光暗缝（移除粗原生硬机械转轴钉）
         seamPaint.style = Paint.Style.STROKE
-        seamPaint.strokeWidth = 1.2f * density
-        seamPaint.color = 0x88000000.toInt()
+        seamPaint.strokeWidth = 1f * density
+        seamPaint.color = 0x44000000.toInt()
         canvas.drawLine(0f, centerY - slitHalf, w, centerY - slitHalf, seamPaint)
 
         seamPaint.color = currentTheme.dividerColor
         seamPaint.strokeWidth = slitHalf * 2f
         canvas.drawLine(0f, centerY, w, centerY, seamPaint)
 
-        seamPaint.color = 0x22FFFFFF.toInt()
-        seamPaint.strokeWidth = 0.8f * density
+        seamPaint.color = currentTheme.glassBorderTopLeft
+        seamPaint.strokeWidth = 0.7f * density
         canvas.drawLine(0f, centerY + slitHalf, w, centerY + slitHalf, seamPaint)
-
-        val notchRadius = 4.2f * density
-        val rivetRadius = 2.2f * density
-
-        cardPaint.shader = null
-        cardPaint.color = currentTheme.bgGradStart
-        canvas.drawCircle(0f, centerY, notchRadius, cardPaint)
-        canvas.drawCircle(w, centerY, notchRadius, cardPaint)
-
-        rivetPaint.style = Paint.Style.FILL
-        rivetPaint.color = currentTheme.accentColor
-        canvas.drawCircle(0f, centerY, rivetRadius, rivetPaint)
-        canvas.drawCircle(w, centerY, rivetRadius, rivetPaint)
-
-        rivetPaint.color = 0x99000000.toInt()
-        canvas.drawCircle(0f, centerY, rivetRadius * 0.45f, rivetPaint)
-        canvas.drawCircle(w, centerY, rivetRadius * 0.45f, rivetPaint)
     }
 
-    private fun drawHalfCardBackground(canvas: Canvas, w: Float, h: Float, radius: Float, isTop: Boolean) {
+    /**
+     * 绘制带有微透高斯毛玻璃渐变与斜向液态折射高光边框的半叶卡片
+     */
+    private fun drawLiquidGlassCardHalf(canvas: Canvas, w: Float, h: Float, radius: Float, isTop: Boolean) {
         cardRect.set(0f, 0f, w, h)
-        val shader = if (isTop) {
+
+        // 1. 半透明微透毛玻璃底色
+        val glassShader = if (isTop) {
             LinearGradient(
                 0f, 0f, 0f, h / 2f,
-                currentTheme.cardTopGradStart, currentTheme.cardTopGradEnd,
+                currentTheme.glassCardStart, currentTheme.glassCardEnd,
                 Shader.TileMode.CLAMP
             )
         } else {
             LinearGradient(
                 0f, h / 2f, 0f, h,
-                currentTheme.cardBottomGradStart, currentTheme.cardBottomGradEnd,
+                currentTheme.glassCardEnd, currentTheme.glassCardStart,
                 Shader.TileMode.CLAMP
             )
         }
-        cardPaint.shader = shader
+        cardPaint.shader = glassShader
         canvas.drawRoundRect(cardRect, radius, radius, cardPaint)
 
-        borderPaint.color = currentTheme.cardBorder
-        borderPaint.strokeWidth = 1f * resources.displayMetrics.density
+        // 2. 细腻的液态高光细边框（斜向渐变白光：模拟物理玻璃边缘倒角折射光）
+        val borderShader = LinearGradient(
+            0f, 0f, w, h,
+            intArrayOf(
+                currentTheme.glassBorderTopLeft,     // 强聚光角
+                currentTheme.glassBorderMid,         // 柔和微透区
+                currentTheme.glassBorderBottomRight  // 底部反光光斑
+            ),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        borderPaint.shader = borderShader
+        borderPaint.strokeWidth = 1.2f * resources.displayMetrics.density
         canvas.drawRoundRect(cardRect, radius, radius, borderPaint)
     }
 }
 
 // =========================================================================================
-// 5. 经典冒号双点组件 (ColonView)
-// =========================================================================================
-
-class ColonView @JvmOverloads constructor(
-    context: Context,
-    attrs: AttributeSet? = null
-) : View(context, attrs) {
-
-    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-    private var theme: ThemeMode = ThemeMode.DARK_VINTAGE
-
-    fun applyTheme(newTheme: ThemeMode) {
-        this.theme = newTheme
-        invalidate()
-    }
-
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val cx = width / 2f
-        val cy = height / 2f
-        val radius = 4f * resources.displayMetrics.density
-        val offset = height * 0.16f
-
-        dotPaint.color = theme.accentColor
-        canvas.drawCircle(cx, cy - offset, radius, dotPaint)
-        canvas.drawCircle(cx, cy + offset, radius, dotPaint)
-    }
-}
-
-// =========================================================================================
-// 6. 顶部极简半透明图标按钮 (HeaderIconButton)
+// 5. 顶部半透明极简控制图标 (HeaderIconButton)
 // =========================================================================================
 
 enum class IconType { ROTATE, RADIO, POMODORO, THEME }
@@ -1413,13 +1625,10 @@ class HeaderIconButton(context: Context, private val iconType: IconType) : View(
                 canvas.drawLine(cx - 3f * density, cy + 7f * density, cx + 3f * density, cy + 7f * density, paint)
             }
             IconType.RADIO -> {
-                // 收音机图标：天线 + 矩形机身 + 旋钮喇叭
                 val rw = 9f * density
                 val rh = 6f * density
                 canvas.drawRoundRect(cx - rw, cy - rh + 1.5f * density, cx + rw, cy + rh + 1.5f * density, 2f * density, 2f * density, paint)
-                // 天线
                 canvas.drawLine(cx - 5f * density, cy - rh + 1.5f * density, cx + 3f * density, cy - rh - 4f * density, paint)
-                // 喇叭圆
                 canvas.drawCircle(cx - 3.5f * density, cy + 1.5f * density, 2.5f * density, paint)
             }
             IconType.POMODORO -> {
@@ -1428,7 +1637,6 @@ class HeaderIconButton(context: Context, private val iconType: IconType) : View(
                 canvas.drawLine(cx, cy, cx + 3.0f * density, cy, paint)
             }
             IconType.THEME -> {
-                // 调色盘圆弧设计
                 canvas.drawCircle(cx, cy, 6.5f * density, paint)
                 paint.style = Paint.Style.FILL
                 canvas.drawCircle(cx - 2.5f * density, cy - 2f * density, 1.2f * density, paint)
@@ -1468,7 +1676,7 @@ class PillButton(context: Context, private var btnText: String) : TextView(conte
 }
 
 // =========================================================================================
-// 7. 和风天气异步请求引擎 (支持 GZIP 压缩检测解压)
+// 6. 和风天气异步请求引擎 (支持 GZIP 压缩自动解压)
 // =========================================================================================
 
 object WeatherEngine {
@@ -1524,7 +1732,7 @@ object WeatherEngine {
 }
 
 // =========================================================================================
-// 8. 算法回退体系 (GanzhiEngine & LunarEngine)
+// 7. 算法回退体系 (GanzhiEngine & LunarEngine)
 // =========================================================================================
 
 object GanzhiEngine {
@@ -1719,7 +1927,7 @@ object LunarEngine {
 }
 
 // =========================================================================================
-// 9. 三大拟物高级配色系统 (深色复古 / 宣纸古韵 / 黑金赛博)
+// 8. 三大液态毛玻璃高级配色系统 (极夜晶玻 / 暖玉流光 / 赛博琉璃)
 // =========================================================================================
 
 enum class ThemeMode(
@@ -1727,71 +1935,79 @@ enum class ThemeMode(
     val bgGradStart: Int,
     val bgGradEnd: Int,
     val cardTopBg: Int,
-    val cardTopGradStart: Int,
-    val cardTopGradEnd: Int,
     val cardBottomBg: Int,
-    val cardBottomGradStart: Int,
-    val cardBottomGradEnd: Int,
+    val glassCardStart: Int,
+    val glassCardEnd: Int,
+    val glassBorderTopLeft: Int,
+    val glassBorderMid: Int,
+    val glassBorderBottomRight: Int,
     val cardBorder: Int,
     val textColor: Int,
     val accentColor: Int,
     val subTextColor: Int,
     val dividerColor: Int,
     val iconBgColor: Int,
-    val iconBorderColor: Int
+    val iconBorderColor: Int,
+    val dialogBgColor: Int
 ) {
     DARK_VINTAGE(
-        title = "深色复古",
-        bgGradStart = 0xFF121215.toInt(),
-        bgGradEnd = 0xFF1B1B22.toInt(),
-        cardTopBg = 0xFF2A2C37.toInt(),
-        cardTopGradStart = 0xFF30323E.toInt(),
-        cardTopGradEnd = 0xFF242630.toInt(),
-        cardBottomBg = 0xFF22242D.toInt(),
-        cardBottomGradStart = 0xFF1D1F27.toInt(),
-        cardBottomGradEnd = 0xFF242630.toInt(),
+        title = "极夜晶玻",
+        bgGradStart = 0xFF0D0E12.toInt(),
+        bgGradEnd = 0xFF151620.toInt(),
+        cardTopBg = 0x22FFFFFF.toInt(),
+        cardBottomBg = 0x14FFFFFF.toInt(),
+        glassCardStart = 0x24FFFFFF.toInt(), // 液态通透微光
+        glassCardEnd = 0x0AFFFFFF.toInt(),
+        glassBorderTopLeft = 0x66FFFFFF.toInt(), // 倒角高光
+        glassBorderMid = 0x15FFFFFF.toInt(),
+        glassBorderBottomRight = 0x33FFFFFF.toInt(),
         cardBorder = 0x33FFFFFF.toInt(),
-        textColor = 0xFFF0EBD8.toInt(),
-        accentColor = 0xFFD4AF37.toInt(),
-        subTextColor = 0xFFA09C91.toInt(),
-        dividerColor = 0xFF101014.toInt(),
-        iconBgColor = 0x22FFFFFF.toInt(),
-        iconBorderColor = 0x33FFFFFF.toInt()
+        textColor = 0xFFFFFFFF.toInt(), // 纯净极简纯白
+        accentColor = 0xFFE5C07B.toInt(), // 柔和流光金
+        subTextColor = 0xFFB0B4C2.toInt(),
+        dividerColor = 0x22FFFFFF.toInt(),
+        iconBgColor = 0x1AFFFFFF.toInt(),
+        iconBorderColor = 0x33FFFFFF.toInt(),
+        dialogBgColor = 0xE6161722.toInt()
     ),
     RICE_PAPER(
-        title = "宣纸古韵",
-        bgGradStart = 0xFFF7F2E6.toInt(),
-        bgGradEnd = 0xFFEDE3CE.toInt(),
-        cardTopBg = 0xFFFAF7F0.toInt(),
-        cardTopGradStart = 0xFFFCFAF5.toInt(),
-        cardTopGradEnd = 0xFFECE3D2.toInt(),
-        cardBottomBg = 0xFFE8DFCE.toInt(),
-        cardBottomGradStart = 0xFFE0D5BF.toInt(),
-        cardBottomGradEnd = 0xFFEAE1CF.toInt(),
-        cardBorder = 0x448B7E66.toInt(),
-        textColor = 0xFF242321.toInt(),
-        accentColor = 0xFFBA3636.toInt(),
-        subTextColor = 0xFF766C5E.toInt(),
-        dividerColor = 0xFFD5C8B2.toInt(),
+        title = "暖玉流光",
+        bgGradStart = 0xFFF5EFE2.toInt(),
+        bgGradEnd = 0xFFE8DDC6.toInt(),
+        cardTopBg = 0x99FFFFFF.toInt(),
+        cardBottomBg = 0x55FFFFFF.toInt(),
+        glassCardStart = 0xAAFFFFFF.toInt(), // 暖玉透白
+        glassCardEnd = 0x66FFFFFF.toInt(),
+        glassBorderTopLeft = 0xEEFFFFFF.toInt(),
+        glassBorderMid = 0x44C2B49D.toInt(),
+        glassBorderBottomRight = 0x99FFFFFF.toInt(),
+        cardBorder = 0x55C2B49D.toInt(),
+        textColor = 0xFF1F1D1A.toInt(), // 徽墨深灰
+        accentColor = 0xFFBA3636.toInt(), // 古法熟朱砂红
+        subTextColor = 0xFF6D6353.toInt(),
+        dividerColor = 0x22000000.toInt(),
         iconBgColor = 0x22000000.toInt(),
-        iconBorderColor = 0x33000000.toInt()
+        iconBorderColor = 0x33000000.toInt(),
+        dialogBgColor = 0xF2FAF6EE.toInt()
     ),
     BLACK_GOLD_CYBER(
-        title = "黑金赛博",
-        bgGradStart = 0xFF050507.toInt(),
-        bgGradEnd = 0xFF0C0C12.toInt(),
-        cardTopBg = 0xFF1A1A24.toInt(),
-        cardTopGradStart = 0xFF20202C.toInt(),
-        cardTopGradEnd = 0xFF15151E.toInt(),
-        cardBottomBg = 0xFF13131A.toInt(),
-        cardBottomGradStart = 0xFF0F0F15.toInt(),
-        cardBottomGradEnd = 0xFF171720.toInt(),
-        cardBorder = 0x33FFD700.toInt(),
-        textColor = 0xFFFFD700.toInt(),
+        title = "赛博琉璃",
+        bgGradStart = 0xFF040406.toInt(),
+        bgGradEnd = 0xFF0A0A10.toInt(),
+        cardTopBg = 0x26FFD700.toInt(),
+        cardBottomBg = 0x121A1A26.toInt(),
+        glassCardStart = 0x22FFD700.toInt(), // 琥珀烟晶琉璃
+        glassCardEnd = 0x08181828.toInt(),
+        glassBorderTopLeft = 0x88FFD700.toInt(),
+        glassBorderMid = 0x18FFD700.toInt(),
+        glassBorderBottomRight = 0x44FFD700.toInt(),
+        cardBorder = 0x44FFD700.toInt(),
+        textColor = 0xFFFFD700.toInt(), // 霓虹亮金
         accentColor = 0xFFFFAA00.toInt(),
-        subTextColor = 0xFFBF9634.toInt(),
-        dividerColor = 0xFF08080B.toInt(),
-        iconBgColor = 0x22FFD700.toInt(),
-        iconBorderColor = 0x33FFD700.toInt()
+        subTextColor = 0xFFC9A23E.toInt(),
+        dividerColor = 0x33FFD700.toInt(),
+        iconBgColor = 0x20FFD700.toInt(),
+        iconBorderColor = 0x44FFD700.toInt(),
+        dialogBgColor = 0xE60E0E16.toInt()
     )
 }
