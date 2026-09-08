@@ -1,5 +1,8 @@
 package com.example.flipclock
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.TimeInterpolator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
@@ -1132,17 +1135,17 @@ object RadioManager {
     fun fetchOnlineStations(onLoaded: (() -> Unit)? = null) {
         Executors.newSingleThreadExecutor().execute {
             val endpoints = listOf(
-                "https://de1.api.radio-browser.info/json/stations/bycountry/China?order=clickcount&reverse=true&limit=250",
-                "https://nl1.api.radio-browser.info/json/stations/bycountry/China?order=clickcount&reverse=true&limit=250",
-                "https://at1.api.radio-browser.info/json/stations/bycountry/China?order=clickcount&reverse=true&limit=250"
+                "https://de1.api.radio-browser.info/json/stations/bycountry/China?order=clickcount&reverse=true",
+                "https://nl1.api.radio-browser.info/json/stations/bycountry/China?order=clickcount&reverse=true",
+                "https://at1.api.radio-browser.info/json/stations/bycountry/China?order=clickcount&reverse=true"
             )
             for (endpoint in endpoints) {
                 try {
                     val url = URL(endpoint)
                     val conn = (url.openConnection() as HttpURLConnection).apply {
                         requestMethod = "GET"
-                        connectTimeout = 8000
-                        readTimeout = 8000
+                        connectTimeout = 10000
+                        readTimeout = 10000
                         setRequestProperty("User-Agent", "FlipClock-Radio/1.0")
                     }
                     if (conn.responseCode == HttpURLConnection.HTTP_OK) {
@@ -1152,7 +1155,7 @@ object RadioManager {
                         for (i in 0 until jsonArray.length()) {
                             val obj = jsonArray.getJSONObject(i)
                             val name = obj.optString("name").trim()
-                            val streamUrl = obj.optString("url_resolved").ifEmpty { obj.optString("url") }.trim()
+                            val streamUrl = obj.optString("url_resolved").trim().ifBlank { obj.optString("url").trim() }
                             var codec = obj.optString("codec").trim().uppercase(Locale.ROOT)
                             if (codec == "UNKNOWN") codec = ""
                             val bitrate = obj.optInt("bitrate", 0)
@@ -1162,7 +1165,8 @@ object RadioManager {
                                 bitrate > 0 -> "${bitrate}k"
                                 else -> "网络流"
                             }
-                            if (name.isNotEmpty() && streamUrl.startsWith("http")) {
+                            // 仅保留 name.isNotBlank() 且 streamUrl.isNotBlank() 的有效电台流
+                            if (name.isNotBlank() && streamUrl.isNotBlank() && streamUrl.startsWith("http")) {
                                 fetched.add(RadioStation(name, streamUrl, tag))
                             }
                         }
@@ -1404,6 +1408,23 @@ class RadioControlBarLayout(context: Context) : LinearLayout(context) {
 // 4. 全新液态毛玻璃风（Liquid Glass）3D 折叠翻牌组件
 // =========================================================================================
 
+/**
+ * 拟物翻牌机械插值器：
+ * 前半程（0° -> -90°）：重力自由下落加速 (Accelerate)
+ * 后半程（90° -> 0°）：机械卡扣归位阻尼减速 (Decelerate)
+ */
+class SplitFlapInterpolator : TimeInterpolator {
+    override fun getInterpolation(input: Float): Float {
+        return if (input < 0.5f) {
+            val t = input * 2f
+            0.5f * Math.pow(t.toDouble(), 1.6).toFloat()
+        } else {
+            val t = (input - 0.5f) * 2f
+            0.5f * (1f + (1f - Math.pow((1f - t).toDouble(), 1.6).toFloat()))
+        }
+    }
+}
+
 class FlipCardView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -1413,6 +1434,7 @@ class FlipCardView @JvmOverloads constructor(
     private var oldValue: String = "00"
     private var newValue: String = "00"
     private var flipProgress: Float = 1.0f
+    private var isAnimating: Boolean = false
 
     private var currentTheme: ThemeMode = ThemeMode.DARK_VINTAGE
 
@@ -1429,6 +1451,8 @@ class FlipCardView @JvmOverloads constructor(
         isAntiAlias = true
         isSubpixelText = true
         isFilterBitmap = true
+        style = Paint.Style.FILL
+        strokeWidth = 0f
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
     }
@@ -1458,29 +1482,61 @@ class FlipCardView @JvmOverloads constructor(
     }
 
     fun setValue(value: String, animate: Boolean) {
-        if (value == newValue && flipProgress >= 1f) return
+        if (value == newValue && !isAnimating) return
 
         if (!animate) {
             animator?.cancel()
+            isAnimating = false
             oldValue = value
             newValue = value
             flipProgress = 1.0f
+            rotationX = 0f
+            alpha = 1.0f
+            transformMatrix.reset()
             invalidate()
             return
         }
 
-        oldValue = newValue
+        if (isAnimating) {
+            animator?.cancel()
+            oldValue = newValue
+        } else {
+            oldValue = newValue
+        }
+
         newValue = value
+        isAnimating = true
         flipProgress = 0.0f
 
         animator?.cancel()
         animator = ValueAnimator.ofFloat(0.0f, 1.0f).apply {
-            duration = 440
-            interpolator = DecelerateInterpolator(1.2f)
+            duration = 600L // 550ms ~ 650ms 机械下坠质感时长
+            interpolator = SplitFlapInterpolator()
             addUpdateListener {
                 flipProgress = it.animatedValue as Float
                 invalidate()
             }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    isAnimating = false
+                    flipProgress = 1.0f
+                    oldValue = newValue
+                    rotationX = 0f
+                    alpha = 1.0f
+                    transformMatrix.reset()
+                    invalidate()
+                }
+
+                override fun onAnimationCancel(animation: Animator) {
+                    isAnimating = false
+                    flipProgress = 1.0f
+                    oldValue = newValue
+                    rotationX = 0f
+                    alpha = 1.0f
+                    transformMatrix.reset()
+                    invalidate()
+                }
+            })
             start()
         }
     }
@@ -1502,10 +1558,34 @@ class FlipCardView @JvmOverloads constructor(
         val fontMetrics = textPaint.fontMetrics
         val textBaseline = centerY - (fontMetrics.descent + fontMetrics.ascent) / 2f
 
+        // 彻底根除鬼影：一旦动画结束或处于静态，仅由一套干净单一的静态组件呈现当前数字
+        if (!isAnimating || flipProgress >= 1.0f) {
+            // 1. 静态上半部 (当前数字)
+            canvas.save()
+            canvas.clipRect(0f, 0f, w, centerY - slitHalf)
+            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true)
+            textPaint.color = currentTheme.textColor
+            canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
+            canvas.restore()
+
+            // 2. 静态下半部 (当前数字)
+            canvas.save()
+            canvas.clipRect(0f, centerY + slitHalf, w, h)
+            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false)
+            textPaint.color = currentTheme.textColor
+            canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
+            canvas.restore()
+
+            // 3. 中缝微光接缝
+            drawSeamLines(canvas, w, centerY, slitHalf, density)
+            return
+        }
+
+        // ==================== 翻转过渡期间（0f < progress < 1f）====================
         // 采用远焦视距参数 -48f * density（彻底消除近景透视失真导致的拉伸降采样模糊与发虚）
         val cameraDistance = -48f * density
 
-        // 1. 底层上半部 (展开的新数字)
+        // 1. 底层上半部 (展开的新数字底板)
         canvas.save()
         canvas.clipRect(0f, 0f, w, centerY - slitHalf)
         drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true)
@@ -1520,7 +1600,7 @@ class FlipCardView @JvmOverloads constructor(
         textPaint.color = currentTheme.textColor
         canvas.drawText(oldValue, w / 2f, textBaseline, textPaint)
 
-        // 细腻的通透玻璃落影
+        // 底板落影 (前半程逐渐加深)
         if (flipProgress < 0.5f) {
             val shadowAlpha = (flipProgress * 2f * 95).toInt().coerceIn(0, 255)
             shadowPaint.alpha = shadowAlpha
@@ -1528,9 +1608,12 @@ class FlipCardView @JvmOverloads constructor(
         }
         canvas.restore()
 
-        // 3. 顶层 3D 旋转翻转叶片
+        // 3. 顶层 3D 旋转活动卡片 (Flap)
         if (flipProgress < 0.5f) {
-            val degree = flipProgress * 180f
+            // 前半程：旧数字上半叶重力下折叠 (0° -> -90°)
+            val phaseProgress = flipProgress / 0.5f
+            val degree = phaseProgress * 90f
+
             canvas.save()
             camera.save()
             camera.setLocation(0f, 0f, cameraDistance)
@@ -1547,12 +1630,16 @@ class FlipCardView @JvmOverloads constructor(
             textPaint.color = currentTheme.textColor
             canvas.drawText(oldValue, w / 2f, textBaseline, textPaint)
 
-            val shadowAlpha = ((degree / 90f) * 110).toInt().coerceIn(0, 255)
+            // 下折时的背光阴影
+            val shadowAlpha = (phaseProgress * 110).toInt().coerceIn(0, 255)
             shadowPaint.alpha = shadowAlpha
             canvas.drawRect(0f, 0f, w, centerY - slitHalf, shadowPaint)
             canvas.restore()
         } else {
-            val degree = 90f - (flipProgress - 0.5f) * 180f
+            // 后半程：新数字下半叶展开卡扣归位 (90° -> 0°)
+            val phaseProgress = (flipProgress - 0.5f) / 0.5f
+            val degree = 90f - phaseProgress * 90f
+
             canvas.save()
             camera.save()
             camera.setLocation(0f, 0f, cameraDistance)
@@ -1569,13 +1656,18 @@ class FlipCardView @JvmOverloads constructor(
             textPaint.color = currentTheme.textColor
             canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
 
-            val shadowAlpha = ((degree / 90f) * 110).toInt().coerceIn(0, 255)
+            // 归位时的阴影淡出
+            val shadowAlpha = ((1f - phaseProgress) * 110).toInt().coerceIn(0, 255)
             shadowPaint.alpha = shadowAlpha
             canvas.drawRect(0f, centerY + slitHalf, w, h, shadowPaint)
             canvas.restore()
         }
 
-        // 4. 极简轻微水平微光暗缝（移除粗原生硬机械转轴钉）
+        // 4. 中缝微光暗缝
+        drawSeamLines(canvas, w, centerY, slitHalf, density)
+    }
+
+    private fun drawSeamLines(canvas: Canvas, w: Float, centerY: Float, slitHalf: Float, density: Float) {
         seamPaint.style = Paint.Style.STROKE
         seamPaint.strokeWidth = 1f * density
         seamPaint.color = 0x44000000.toInt()
