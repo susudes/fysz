@@ -683,9 +683,14 @@ class MainActivity : AppCompatActivity() {
         btnPomodoroReset.applyTheme(theme)
 
         if (showToast) {
+            val density = resources.displayMetrics.density
             tvThemeToast.text = "配色：${theme.title}"
             tvThemeToast.setTextColor(theme.textColor)
-            tvThemeToast.setBackgroundColor(theme.cardTopBg)
+            tvThemeToast.background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 16f * density
+                setColor(theme.cardTopBg)
+                setStroke((1 * density).toInt(), theme.cardBorder)
+            }
             tvThemeToast.animate().alpha(1f).setDuration(200).withEndAction {
                 tvThemeToast.animate().alpha(0f).setStartDelay(1000).setDuration(350).start()
             }.start()
@@ -1371,8 +1376,10 @@ enum class ThemeMode(
     val title: String,
     val bgGradStart: Int,
     val bgGradEnd: Int,
+    val cardTopBg: Int,
     val cardTopGradStart: Int,
     val cardTopGradEnd: Int,
+    val cardBottomBg: Int,
     val cardBottomGradStart: Int,
     val cardBottomGradEnd: Int,
     val cardBorder: Int,
@@ -1387,8 +1394,10 @@ enum class ThemeMode(
         title = "深色复古",
         bgGradStart = 0xFF121215.toInt(),
         bgGradEnd = 0xFF1B1B22.toInt(),
+        cardTopBg = 0xFF2A2C37.toInt(), // 上半张翻牌背景色
         cardTopGradStart = 0xFF30323E.toInt(), // 顶光微亮
         cardTopGradEnd = 0xFF242630.toInt(),
+        cardBottomBg = 0xFF22242D.toInt(),
         cardBottomGradStart = 0xFF1D1F27.toInt(), // 下半部接缝暗沉
         cardBottomGradEnd = 0xFF242630.toInt(),
         cardBorder = 0x33FFFFFF.toInt(),
@@ -1403,8 +1412,10 @@ enum class ThemeMode(
         title = "宣纸古韵",
         bgGradStart = 0xFFF7F2E6.toInt(),
         bgGradEnd = 0xFFEDE3CE.toInt(),
+        cardTopBg = 0xFFFAF7F0.toInt(), // 上半张翻牌背景色
         cardTopGradStart = 0xFFFCFAF5.toInt(),
         cardTopGradEnd = 0xFFECE3D2.toInt(),
+        cardBottomBg = 0xFFE8DFCE.toInt(),
         cardBottomGradStart = 0xFFE0D5BF.toInt(),
         cardBottomGradEnd = 0xFFEAE1CF.toInt(),
         cardBorder = 0x448B7E66.toInt(),
@@ -1419,8 +1430,10 @@ enum class ThemeMode(
         title = "黑金赛博",
         bgGradStart = 0xFF050507.toInt(),
         bgGradEnd = 0xFF0C0C12.toInt(),
+        cardTopBg = 0xFF1A1A24.toInt(), // 上半张翻牌背景色
         cardTopGradStart = 0xFF20202C.toInt(),
         cardTopGradEnd = 0xFF15151E.toInt(),
+        cardBottomBg = 0xFF13131A.toInt(),
         cardBottomGradStart = 0xFF0F0F15.toInt(),
         cardBottomGradEnd = 0xFF171720.toInt(),
         cardBorder = 0x33FFD700.toInt(),
