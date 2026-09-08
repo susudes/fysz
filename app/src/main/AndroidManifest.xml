@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 番茄钟倒计时结束触觉震动反馈 -->
+    <!-- 网络访问权限（用于和风天气 API 数据请求） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 触觉震动权限（用于番茄钟倒计时结束反馈） -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application

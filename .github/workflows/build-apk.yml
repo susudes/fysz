@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -54,17 +56,26 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Update Latest Tag
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git tag -f latest
+          git push -f origin latest || true
+
       - name: Publish to GitHub Releases
         if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "最新构建 (Latest Build)"
+          body: |
+            ### 📱 拟物翻页时钟最新安装包
+            - **提交信息**: ${{ github.event.head_commit.message }}
+            - **Commit**: ${{ github.sha }}
+            - **构建时间**: ${{ github.event.head_commit.timestamp }}
+            
+            可直接点击下方 `app-debug.apk` 下载并在手机上安装体验。
+          files: app/build/outputs/apk/debug/app-debug.apk
+          make_latest: true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Deleting previous latest release and tag if exist..."
-          gh release delete latest --cleanup-tag --yes || true
-
-          echo "Creating new latest release and uploading app-debug.apk..."
-          gh release create latest app/build/outputs/apk/debug/app-debug.apk \
-            --title "Latest Build" \
-            --notes "由 GitHub Actions 自动编译构建产物 (Commit: ${{ github.sha }})" \
-            --latest
