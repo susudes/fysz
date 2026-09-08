@@ -32,8 +32,13 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -108,6 +113,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var radioControlBar: RadioControlBarLayout
     private lateinit var radioStationDialogOverlay: FrameLayout
     private lateinit var radioDialogCard: LinearLayout
+    private lateinit var radioSearchContainer: LinearLayout
+    private lateinit var etRadioSearch: EditText
+    private lateinit var btnSearchClear: TextView
+    private var currentRadioSearchKeyword: String = ""
     private lateinit var radioDialogScrollView: ScrollView
     private lateinit var radioStationsContainer: LinearLayout
     private lateinit var tvDialogStationCount: TextView
@@ -484,7 +493,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 构建半透明毛玻璃电台列表弹窗视图
+     * 构建半透明毛玻璃电台列表弹窗视图（带关键字实时搜索栏）
      */
     @SuppressLint("ClickableViewAccessibility")
     private fun setupRadioStationDialog() {
@@ -508,17 +517,16 @@ class MainActivity : AppCompatActivity() {
 
         radioDialogCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            val cardW = (350 * density).toInt()
-            val maxCardH = (460 * density).toInt()
+            val cardW = (360 * density).toInt()
             layoutParams = FrameLayout.LayoutParams(cardW, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER).apply {
-                topMargin = (30 * density).toInt()
-                bottomMargin = (30 * density).toInt()
+                topMargin = (24 * density).toInt()
+                bottomMargin = (24 * density).toInt()
             }
-            setPadding((20 * density).toInt(), (18 * density).toInt(), (20 * density).toInt(), (18 * density).toInt())
+            setPadding((20 * density).toInt(), (16 * density).toInt(), (20 * density).toInt(), (16 * density).toInt())
             setOnTouchListener { _, _ -> true } // 消费卡片内部触碰
         }
 
-        // 弹窗顶部栏：标题、频道计数与关闭按钮
+        // 弹窗顶部栏：标题与关闭按钮
         val headerLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -528,26 +536,13 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        val titleBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
-        }
-
         val tvDialogTitle = TextView(this).apply {
             text = "📻 广播电台频道"
             textSize = 17f
             typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
         }
-        titleBox.addView(tvDialogTitle)
-
-        tvDialogStationCount = TextView(this).apply {
-            text = "中国电台 (已加载 ${RadioManager.getStationCount()} 个) · 点击即刻收听"
-            textSize = 11.5f
-            alpha = 0.75f
-            setPadding(0, (2 * density).toInt(), 0, 0)
-        }
-        titleBox.addView(tvDialogStationCount)
-        headerLayout.addView(titleBox)
+        headerLayout.addView(tvDialogTitle)
 
         val btnClose = TextView(this).apply {
             text = "✕"
@@ -561,16 +556,98 @@ class MainActivity : AppCompatActivity() {
         headerLayout.addView(btnClose)
         radioDialogCard.addView(headerLayout)
 
+        // 1. 精致毛玻璃搜索栏 (带提示文字、搜索图标、一键清除按钮)
+        radioSearchContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (38 * density).toInt()
+            ).apply {
+                topMargin = (10 * density).toInt()
+                bottomMargin = (4 * density).toInt()
+            }
+            setPadding((10 * density).toInt(), 0, (8 * density).toInt(), 0)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 10f * density
+                setColor(currentTheme.iconBgColor)
+                setStroke((1 * density).toInt(), currentTheme.glassBorderMid)
+            }
+        }
+
+        val tvSearchIcon = TextView(this).apply {
+            text = "🔍"
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, (6 * density).toInt(), 0)
+        }
+        radioSearchContainer.addView(tvSearchIcon)
+
+        etRadioSearch = EditText(this).apply {
+            hint = "搜索电台名称（如：音乐、新闻、北京...）"
+            textSize = 13f
+            background = null
+            setSingleLine(true)
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            setTextColor(currentTheme.textColor)
+            setHintTextColor((currentTheme.subTextColor and 0x00FFFFFF) or 0x88000000.toInt())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+        }
+        radioSearchContainer.addView(etRadioSearch)
+
+        btnSearchClear = TextView(this).apply {
+            text = "✕"
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            visibility = View.GONE
+            val p = (6 * density).toInt()
+            setPadding(p, p, p, p)
+            setTextColor(currentTheme.subTextColor)
+            setOnClickListener {
+                etRadioSearch.setText("")
+            }
+        }
+        radioSearchContainer.addView(btnSearchClear)
+        radioDialogCard.addView(radioSearchContainer)
+
+        // 实时关键字响应式过滤
+        etRadioSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                val keyword = s?.toString()?.trim() ?: ""
+                currentRadioSearchKeyword = keyword
+                btnSearchClear.visibility = if (keyword.isNotEmpty()) View.VISIBLE else View.GONE
+                updateRadioDialogList(keyword)
+            }
+        })
+
+        // 频道计数与过滤提示副标题
+        tvDialogStationCount = TextView(this).apply {
+            text = "中国电台 (已加载 ${RadioManager.getStationCount()} 个) · 点击即刻收听"
+            textSize = 11.5f
+            alpha = 0.75f
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = (4 * density).toInt()
+                bottomMargin = (2 * density).toInt()
+            }
+        }
+        radioDialogCard.addView(tvDialogStationCount)
+
         // 中部分割线
         val divider = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1).apply {
-                topMargin = (12 * density).toInt()
-                bottomMargin = (10 * density).toInt()
+                topMargin = (4 * density).toInt()
+                bottomMargin = (6 * density).toInt()
             }
         }
         radioDialogCard.addView(divider)
 
-        // 可滑动的电台列表容器 (支持 200+ 电台平滑滚动)
+        // 可滑动的电台列表容器 (支持全量电台平滑滚动)
         radioDialogScrollView = ScrollView(this).apply {
             val maxH = (340 * density).toInt()
             layoutParams = LinearLayout.LayoutParams(
@@ -598,16 +675,70 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 刷新并填充电台频道列表弹窗项（包含电台流格式与码率标签）
+     * 响应式过滤并填充电台频道列表（支持全量电台与关键字即时搜索）
      */
-    private fun updateRadioDialogList() {
+    private fun updateRadioDialogList(searchKeyword: String = currentRadioSearchKeyword) {
         radioStationsContainer.removeAllViews()
-        val stations = RadioManager.getStations()
+        val allStations = RadioManager.getStations()
         val density = resources.displayMetrics.density
-        tvDialogStationCount.text = "中国电台 (已加载 ${stations.size} 个) · 点击即刻收听"
 
-        stations.forEachIndexed { index, station ->
-            val isCurrent = (index == RadioManager.getCurrentIndex())
+        val filteredList = if (searchKeyword.isEmpty()) {
+            allStations
+        } else {
+            allStations.filter { it.name.contains(searchKeyword, ignoreCase = true) }
+        }
+
+        if (searchKeyword.isEmpty()) {
+            tvDialogStationCount.text = "中国电台 (已加载 ${allStations.size} 个) · 点击即刻收听"
+        } else {
+            tvDialogStationCount.text = "找到 ${filteredList.size} 个相关电台 (共 ${allStations.size} 个)"
+        }
+
+        if (filteredList.isEmpty()) {
+            // 未找到内容的友好提示
+            val emptyLayout = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    (180 * density).toInt()
+                )
+            }
+            val tvEmptyIcon = TextView(this).apply {
+                text = "📻"
+                textSize = 32f
+                gravity = Gravity.CENTER
+                alpha = 0.6f
+            }
+            emptyLayout.addView(tvEmptyIcon)
+
+            val tvEmpty = TextView(this).apply {
+                text = "未找到相关电台"
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(currentTheme.subTextColor)
+                gravity = Gravity.CENTER
+                setPadding(0, (8 * density).toInt(), 0, 0)
+            }
+            emptyLayout.addView(tvEmpty)
+
+            val tvEmptyHint = TextView(this).apply {
+                text = "换个关键词试试（如：音乐、新闻、北京、交通等）"
+                textSize = 11.5f
+                setTextColor(currentTheme.subTextColor)
+                alpha = 0.65f
+                gravity = Gravity.CENTER
+                setPadding(0, (4 * density).toInt(), 0, 0)
+            }
+            emptyLayout.addView(tvEmptyHint)
+
+            radioStationsContainer.addView(emptyLayout)
+            return
+        }
+
+        filteredList.forEachIndexed { filteredIndex, station ->
+            val originalIndex = allStations.indexOf(station)
+            val isCurrent = (originalIndex == RadioManager.getCurrentIndex())
             val isPlayingThis = isCurrent && RadioManager.isPlaying
 
             val itemView = LinearLayout(this).apply {
@@ -635,8 +766,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 background = bg
 
+                // 点击后立即播放所选电台并关闭弹窗
                 setOnClickListener {
-                    RadioManager.play(index)
+                    val playIdx = if (originalIndex >= 0) originalIndex else 0
+                    RadioManager.play(playIdx)
                     hideRadioStationDialog()
                     if (radioControlBar.visibility != View.VISIBLE) {
                         toggleRadioControlBar()
@@ -646,7 +779,7 @@ class MainActivity : AppCompatActivity() {
 
             // 电台序号标签
             val tvIndex = TextView(this).apply {
-                text = String.format(Locale.US, "#%02d", index + 1)
+                text = String.format(Locale.US, "#%02d", (if (originalIndex >= 0) originalIndex else filteredIndex) + 1)
                 textSize = 12f
                 typeface = Typeface.MONOSPACE
                 alpha = if (isCurrent) 1f else 0.5f
@@ -706,15 +839,22 @@ class MainActivity : AppCompatActivity() {
         val screenH = resources.displayMetrics.heightPixels
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val maxScrollH = if (isLandscape) {
-            (screenH * 0.46f).toInt().coerceAtLeast((160 * density).toInt())
+            (screenH * 0.42f).toInt().coerceAtLeast((150 * density).toInt())
         } else {
-            (screenH * 0.50f).toInt().coerceIn((240 * density).toInt(), (380 * density).toInt())
+            (screenH * 0.48f).toInt().coerceIn((220 * density).toInt(), (360 * density).toInt())
         }
         val lp = radioDialogScrollView.layoutParams
         lp.height = maxScrollH
         radioDialogScrollView.layoutParams = lp
 
-        updateRadioDialogList()
+        // 打开弹窗时清空搜索栏，展示全量列表
+        if (::etRadioSearch.isInitialized) {
+            etRadioSearch.setText("")
+            currentRadioSearchKeyword = ""
+            btnSearchClear.visibility = View.GONE
+        }
+        updateRadioDialogList("")
+
         radioStationDialogOverlay.visibility = View.VISIBLE
         radioDialogCard.scaleX = 0.95f
         radioDialogCard.scaleY = 0.95f
@@ -731,6 +871,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hideRadioStationDialog() {
+        // 收起键盘
+        if (::etRadioSearch.isInitialized) {
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.hideSoftInputFromWindow(etRadioSearch.windowToken, 0)
+        }
+
         radioStationDialogOverlay.animate()
             .alpha(0f)
             .setDuration(180)
@@ -1291,13 +1437,26 @@ class MainActivity : AppCompatActivity() {
 
         radioControlBar.applyTheme(theme)
 
-        // 更新电台毛玻璃卡片背景与颜色
+        // 更新电台毛玻璃卡片背景与搜索栏配色
         val dialogBg = android.graphics.drawable.GradientDrawable().apply {
             cornerRadius = 24f * density
             setColor(theme.dialogBgColor)
             setStroke((1.2f * density).toInt(), theme.glassBorderTopLeft)
         }
         radioDialogCard.background = dialogBg
+
+        if (::radioSearchContainer.isInitialized) {
+            val searchBg = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 10f * density
+                setColor(theme.iconBgColor)
+                setStroke((1 * density).toInt(), theme.glassBorderMid)
+            }
+            radioSearchContainer.background = searchBg
+            etRadioSearch.setTextColor(theme.textColor)
+            etRadioSearch.setHintTextColor((theme.subTextColor and 0x00FFFFFF) or 0x88000000.toInt())
+            btnSearchClear.setTextColor(theme.subTextColor)
+        }
+
         updateRadioDialogList()
 
         if (::pomodoroDialogCard.isInitialized) {
@@ -1789,12 +1948,6 @@ class FlipCardView @JvmOverloads constructor(
     private val seamPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         isAntiAlias = true
     }
-    // 翻转卡片内侧实色不透光遮罩 Paint，彻底阻断半透明毛玻璃背景下的透视重影
-    private val solidMaskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        isAntiAlias = true
-        isFilterBitmap = true
-        style = Paint.Style.FILL
-    }
 
     private val camera = Camera()
     private val transformMatrix = Matrix()
@@ -1888,22 +2041,16 @@ class FlipCardView @JvmOverloads constructor(
         val fontMetrics = textPaint.fontMetrics
         val textBaseline = centerY - (fontMetrics.descent + fontMetrics.ascent) / 2f
 
-        // 彻底根除鬼影：一旦动画结束或处于静态，仅由一套干净单一的静态组件呈现当前数字
+        // 静态状态（动画未激活或已完成）：仅由一套干净的一体化静态卡片呈现当前数字，彻底隐藏所有活动 Flap 图层
         if (!isAnimating || flipProgress >= 1.0f) {
             // 1. 静态上半部 (当前数字)
             canvas.save()
-            canvas.clipRect(0f, 0f, w, centerY - slitHalf)
-            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true, isOpaque = false)
-            textPaint.color = currentTheme.textColor
-            canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
+            drawHalfCard(canvas, w, h, centerY, slitHalf, cornerRadius, density, textBaseline, newValue, isTop = true)
             canvas.restore()
 
             // 2. 静态下半部 (当前数字)
             canvas.save()
-            canvas.clipRect(0f, centerY + slitHalf, w, h)
-            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false, isOpaque = false)
-            textPaint.color = currentTheme.textColor
-            canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
+            drawHalfCard(canvas, w, h, centerY, slitHalf, cornerRadius, density, textBaseline, newValue, isTop = false)
             canvas.restore()
 
             // 3. 中缝微光接缝
@@ -1911,37 +2058,28 @@ class FlipCardView @JvmOverloads constructor(
             return
         }
 
-        // ==================== 严格四半区物理遮蔽结构（0f < progress < 1f）====================
+        // ==================== 翻转过渡期间（0f < progress < 1f）====================
         val cameraDistance = -48f * density
 
-        // 1. 上半区静止底板：翻页一开始，立即绘制【新数字】上半部，待上方旧叶片翻落后完整展现
+        // 1. 静止底层上半部：翻页一开始，绘制【新数字】上半部，待上方旧叶片翻落后完整显现
         canvas.save()
-        canvas.clipRect(0f, 0f, w, centerY - slitHalf)
-        drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true, isOpaque = false)
-        textPaint.color = currentTheme.textColor
-        canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
+        drawHalfCard(canvas, w, h, centerY, slitHalf, cornerRadius, density, textBaseline, newValue, isTop = true)
         canvas.restore()
 
-        // 2. 下半区静止底板：翻页一开始（progress > 0.05f），【旧数字】下半部立即隐去，换为纯深色底板，杜绝透光重影
+        // 2. 静止底层下半部：绘制【旧数字】下半部，由下折活动叶片逐步覆盖
         canvas.save()
-        canvas.clipRect(0f, centerY + slitHalf, w, h)
-        drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false, isOpaque = false)
-        if (flipProgress <= 0.05f) {
-            textPaint.color = currentTheme.textColor
-            canvas.drawText(oldValue, w / 2f, textBaseline, textPaint)
-        }
-
-        // 底板落影 (前半程逐渐加深)
+        drawHalfCard(canvas, w, h, centerY, slitHalf, cornerRadius, density, textBaseline, oldValue, isTop = false)
+        // 前半程静止下半部落影 (前半程逐渐加深)
         if (flipProgress < 0.5f) {
-            val shadowAlpha = (flipProgress * 2f * 95).toInt().coerceIn(0, 255)
+            val shadowAlpha = (flipProgress * 2f * 85).toInt().coerceIn(0, 255)
             shadowPaint.alpha = shadowAlpha
             canvas.drawRect(0f, centerY + slitHalf, w, h, shadowPaint)
         }
         canvas.restore()
 
-        // 3. 顶层 3D 旋转活动卡片 (Flap，内侧绘制实色不透光遮罩，消除半透明穿帮)
+        // 3. 顶层 3D 旋转活动卡片 (Flap 一体化结构：底色 + 居中裁切文字，严禁任何空背景色块)
         if (flipProgress < 0.5f) {
-            // 前半程：旧数字上半叶重力下折叠 (0° -> -90°)，只绘制【旧数字】上半部
+            // 翻转前半程（0° 到 -90°）：仅显示【旧数字上半部】沿底边下折
             val phaseProgress = flipProgress / 0.5f
             val degree = phaseProgress * 90f
 
@@ -1956,19 +2094,15 @@ class FlipCardView @JvmOverloads constructor(
             transformMatrix.postTranslate(w / 2f, centerY)
             canvas.concat(transformMatrix)
 
-            canvas.clipRect(0f, 0f, w, centerY - slitHalf)
-            // 绘制实色不透光遮罩底板
-            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = true, isOpaque = true)
-            textPaint.color = currentTheme.textColor
-            canvas.drawText(oldValue, w / 2f, textBaseline, textPaint)
+            drawHalfCard(canvas, w, h, centerY, slitHalf, cornerRadius, density, textBaseline, oldValue, isTop = true)
 
             // 下折时的背光阴影
-            val shadowAlpha = (phaseProgress * 110).toInt().coerceIn(0, 255)
+            val shadowAlpha = (phaseProgress * 95).toInt().coerceIn(0, 255)
             shadowPaint.alpha = shadowAlpha
             canvas.drawRect(0f, 0f, w, centerY - slitHalf, shadowPaint)
             canvas.restore()
         } else {
-            // 后半程：新数字下半叶展开卡扣归位 (90° -> 0°)，只绘制【新数字】下半部
+            // 翻转后半程（90° 到 0°）：仅显示【新数字下半部】沿顶边下翻
             val phaseProgress = (flipProgress - 0.5f) / 0.5f
             val degree = 90f - phaseProgress * 90f
 
@@ -1983,14 +2117,10 @@ class FlipCardView @JvmOverloads constructor(
             transformMatrix.postTranslate(w / 2f, centerY)
             canvas.concat(transformMatrix)
 
-            canvas.clipRect(0f, centerY + slitHalf, w, h)
-            // 绘制实色不透光遮罩底板
-            drawLiquidGlassCardHalf(canvas, w, h, cornerRadius, isTop = false, isOpaque = true)
-            textPaint.color = currentTheme.textColor
-            canvas.drawText(newValue, w / 2f, textBaseline, textPaint)
+            drawHalfCard(canvas, w, h, centerY, slitHalf, cornerRadius, density, textBaseline, newValue, isTop = false)
 
             // 归位时的阴影淡出
-            val shadowAlpha = ((1f - phaseProgress) * 110).toInt().coerceIn(0, 255)
+            val shadowAlpha = ((1f - phaseProgress) * 95).toInt().coerceIn(0, 255)
             shadowPaint.alpha = shadowAlpha
             canvas.drawRect(0f, centerY + slitHalf, w, h, shadowPaint)
             canvas.restore()
@@ -2016,30 +2146,37 @@ class FlipCardView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制带有微透高斯毛玻璃渐变与斜向液态折射高光边框的半叶卡片
-     * @param isOpaque 是否开启实色不透光遮罩（活动翻片开启，防止透过半透明底板看穿底层静态数字）
+     * 一体化半卡片绘制（上半区 / 下半区 / 翻转上半区 / 翻转下半区统一入口）
+     * 规范：严格 clipRect 裁切 + 统一暗晶微透底色 + 毛玻璃微光渐变 + 1dp 折射高光边框 + 居中文字裁切
+     * 严禁任何独立的空白遮罩层与无文字空背景块！
      */
-    private fun drawLiquidGlassCardHalf(
+    private fun drawHalfCard(
         canvas: Canvas,
         w: Float,
         h: Float,
+        centerY: Float,
+        slitHalf: Float,
         radius: Float,
-        isTop: Boolean,
-        isOpaque: Boolean = false
+        density: Float,
+        textBaseline: Float,
+        text: String,
+        isTop: Boolean
     ) {
-        cardRect.set(0f, 0f, w, h)
-
-        if (isOpaque) {
-            // 实色不透光基底：彻底阻断透光穿帮
-            solidMaskPaint.color = Color.rgb(
-                Color.red(currentTheme.cardTopBg),
-                Color.green(currentTheme.cardTopBg),
-                Color.blue(currentTheme.cardTopBg)
-            )
-            canvas.drawRoundRect(cardRect, radius, radius, solidMaskPaint)
+        if (isTop) {
+            canvas.clipRect(0f, 0f, w, centerY - slitHalf)
+        } else {
+            canvas.clipRect(0f, centerY + slitHalf, w, h)
         }
 
-        // 1. 半透明微透毛玻璃底色
+        cardRect.set(0f, 0f, w, h)
+
+        // 1. 一体化深色暗晶底色（统一深色微透玻璃底色，如 0xFF22242A，彻底杜绝半透明穿帮与纯白纯灰大色块）
+        cardPaint.shader = null
+        cardPaint.style = Paint.Style.FILL
+        cardPaint.color = currentTheme.cardBaseBg
+        canvas.drawRoundRect(cardRect, radius, radius, cardPaint)
+
+        // 2. 细腻的毛玻璃光泽微透渐变叠加
         val glassShader = if (isTop) {
             LinearGradient(
                 0f, 0f, 0f, h / 2f,
@@ -2056,7 +2193,7 @@ class FlipCardView @JvmOverloads constructor(
         cardPaint.shader = glassShader
         canvas.drawRoundRect(cardRect, radius, radius, cardPaint)
 
-        // 2. 细腻的液态高光细边框（斜向渐变白光：模拟物理玻璃边缘倒角折射光）
+        // 3. 1dp 细微白边 / 高光折射倒角边框
         val borderShader = LinearGradient(
             0f, 0f, w, h,
             intArrayOf(
@@ -2068,8 +2205,12 @@ class FlipCardView @JvmOverloads constructor(
             Shader.TileMode.CLAMP
         )
         borderPaint.shader = borderShader
-        borderPaint.strokeWidth = 1.2f * resources.displayMetrics.density
+        borderPaint.strokeWidth = 1f * density
         canvas.drawRoundRect(cardRect, radius, radius, borderPaint)
+
+        // 4. 居中裁切文字（上半区显示上半段，下半区显示下半段）
+        textPaint.color = currentTheme.textColor
+        canvas.drawText(text, w / 2f, textBaseline, textPaint)
     }
 }
 
@@ -2440,6 +2581,7 @@ enum class ThemeMode(
     val title: String,
     val bgGradStart: Int,
     val bgGradEnd: Int,
+    val cardBaseBg: Int,
     val cardTopBg: Int,
     val cardBottomBg: Int,
     val glassCardStart: Int,
@@ -2460,6 +2602,7 @@ enum class ThemeMode(
         title = "极夜晶玻",
         bgGradStart = 0xFF0D0E12.toInt(),
         bgGradEnd = 0xFF151620.toInt(),
+        cardBaseBg = 0xFF22242A.toInt(),
         cardTopBg = 0x22FFFFFF.toInt(),
         cardBottomBg = 0x14FFFFFF.toInt(),
         glassCardStart = 0x24FFFFFF.toInt(), // 液态通透微光
@@ -2480,6 +2623,7 @@ enum class ThemeMode(
         title = "暖玉流光",
         bgGradStart = 0xFFF5EFE2.toInt(),
         bgGradEnd = 0xFFE8DDC6.toInt(),
+        cardBaseBg = 0xFFEAE3D2.toInt(),
         cardTopBg = 0x99FFFFFF.toInt(),
         cardBottomBg = 0x55FFFFFF.toInt(),
         glassCardStart = 0xAAFFFFFF.toInt(), // 暖玉透白
@@ -2500,6 +2644,7 @@ enum class ThemeMode(
         title = "赛博琉璃",
         bgGradStart = 0xFF040406.toInt(),
         bgGradEnd = 0xFF0A0A10.toInt(),
+        cardBaseBg = 0xFF14151C.toInt(),
         cardTopBg = 0x26FFD700.toInt(),
         cardBottomBg = 0x121A1A26.toInt(),
         glassCardStart = 0x22FFD700.toInt(), // 琥珀烟晶琉璃
